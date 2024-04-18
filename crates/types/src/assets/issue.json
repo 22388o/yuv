@@ -1,0 +1,46 @@
+{
+  "bitcoin_tx": {
+    "version": 1,
+    "lock_time": 315,
+    "input": [
+      {
+        "previous_output": "9ea621f64b8d64ebe3430e2212caa9b77175825cd3fc0c800ab9e30f03736cec:1",
+        "script_sig": "",
+        "sequence": 4294967294,
+        "witness": [
+          "304402203c50474c2ba73b0b00d3e660d05bfd1edb2fc056995c45acba5181eab21f7c19022049599c14c20aa85da311536abd9967825d6b9f36eafc67429a112efe6d7f57fa01",
+          "025510996bdb5271f84896eb42ea5b6c4ba3bd96f90a605c70a7f2b402f0afdad0"
+        ]
+      }
+    ],
+    "output": [
+      {
+        "value": 10000,
+        "script_pubkey": "001416648ddda83c0322c36b889dd32a8be3eb828553"
+      },
+      {
+        "value": 99918624,
+        "script_pubkey": "001429999f2fa94a248eff7187471847dd9fa47c02dc"
+      }
+    ]
+  },
+  "tx_type": {
+    "type": "Issue",
+    "data": {
+      "output_proofs": {
+        "0": {
+          "type": "Sig",
+          "data": {
+            "pixel": {
+              "luma": {
+                "amount": 1111
+              },
+              "chroma": "5510996bdb5271f84896eb42ea5b6c4ba3bd96f90a605c70a7f2b402f0afdad0"
+            },
+            "inner_key": "027bf59465bf6cb3faa969e963c6934a2bee2b38c5d981c0b2226ed669149945db"
+          }
+        }
+      }
+    }
+  }
+}
