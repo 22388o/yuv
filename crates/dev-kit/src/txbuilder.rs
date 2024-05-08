@@ -11,7 +11,7 @@ use bitcoin::{
     secp256k1::{self, All, Secp256k1},
     OutPoint, PrivateKey, PublicKey, Script, Transaction, TxOut, XOnlyPublicKey,
 };
-use eyre::{bail, eyre, Context};
+use eyre::{bail, eyre, Context, OptionExt};
 
 use bdk::{
     blockchain::Blockchain,
@@ -22,14 +22,18 @@ use bdk::{
 };
 #[cfg(feature = "bulletproof")]
 use yuv_pixels::{k256::ProjectivePoint, Luma, RangeProof};
-use yuv_pixels::{Chroma, MultisigPixelProof, Pixel, PixelKey, PixelProof, SigPixelProof};
+use yuv_pixels::{
+    Chroma, EmptyPixelProof, MultisigPixelProof, Pixel, PixelKey, PixelProof, SigPixelProof,
+    ToEvenPublicKey,
+};
 use yuv_storage::TransactionsStorage as YuvTransactionsStorage;
-use yuv_types::{YuvTransaction, YuvTxType};
+use yuv_types::{announcements::IssueAnnouncement, AnyAnnouncement};
+use yuv_types::{ProofMap, YuvTransaction, YuvTxType};
 
 use crate::{
     bitcoin_provider::BitcoinProvider,
     txsigner::TransactionSigner,
-    types::{FeeRate, FeeRateStrategy, Utxo, WeightedUtxo, YuvTxOut, YuvUtxo},
+    types::{FeeRateStrategy, Utxo, WeightedUtxo, YuvTxOut, YuvUtxo},
     yuv_coin_selection::{YUVCoinSelectionAlgorithm, YuvLargestFirstCoinSelection},
     Wallet,
 };
@@ -43,6 +47,9 @@ enum BuilderInput {
     Pixel {
         outpoint: OutPoint,
     },
+    TweakedSatoshis {
+        outpoint: OutPoint,
+    },
     #[cfg(feature = "bulletproof")]
     BulletproofPixel {
         outpoint: OutPoint,
@@ -52,9 +59,9 @@ enum BuilderInput {
 impl BuilderInput {
     fn outpoint(&self) -> OutPoint {
         match self {
-            BuilderInput::Multisig2x2 { outpoint, .. } | BuilderInput::Pixel { outpoint } => {
-                *outpoint
-            }
+            BuilderInput::Multisig2x2 { outpoint, .. }
+            | BuilderInput::Pixel { outpoint }
+            | BuilderInput::TweakedSatoshis { outpoint } => *outpoint,
             #[cfg(feature = "bulletproof")]
             BuilderInput::BulletproofPixel { outpoint, .. } => *outpoint,
         }
@@ -65,18 +72,18 @@ impl BuilderInput {
 enum BuilderOutput {
     Satoshis {
         satoshis: u64,
-        script_pubkey: Script,
+        recipient: secp256k1::PublicKey,
     },
     Pixel {
         chroma: Chroma,
         satoshis: u64,
-        amount: u64,
+        amount: u128,
         recipient: secp256k1::PublicKey,
     },
     MultisigPixel {
         chroma: Chroma,
         satoshis: u64,
-        amount: u64,
+        amount: u128,
         participants: Vec<secp256k1::PublicKey>,
         required_signatures: u8,
     },
@@ -93,7 +100,7 @@ enum BuilderOutput {
 }
 
 impl BuilderOutput {
-    fn amount(&self) -> u64 {
+    fn amount(&self) -> u128 {
         match self {
             BuilderOutput::Satoshis { .. } => 0,
             BuilderOutput::Pixel { amount, .. } | BuilderOutput::MultisigPixel { amount, .. } => {
@@ -159,6 +166,9 @@ struct TransactionBuilder<YuvTxsDatabase, BitcoinTxsDatabase> {
 
     /// Indicated if inputs were selected by user.
     is_inputs_selected: bool,
+
+    /// Instructs txbuilder to add tweaked satoshis as transaction inputs
+    should_drain_tweaked_satoshis: bool,
 }
 
 unsafe impl<YuvTxsDatabase, BitcoinTxsDatabase> Sync
@@ -175,6 +185,42 @@ where
     YuvTxsDatabase: Send,
     BitcoinTxsDatabase: Send,
 {
+}
+
+pub struct SweepTransactionBuilder<YuvTxsDatabase, BitcoinTxsDatabase>(
+    TransactionBuilder<YuvTxsDatabase, BitcoinTxsDatabase>,
+);
+
+impl<YTDB, BDB, YC, BP> TryFrom<&Wallet<YC, YTDB, BP, BDB>> for SweepTransactionBuilder<YTDB, BDB>
+where
+    YTDB: YuvTransactionsStorage + Clone + Send + Sync + 'static,
+    BDB: bdk::database::BatchDatabase + Clone + Send,
+    BP: BitcoinProvider,
+{
+    type Error = eyre::Error;
+
+    fn try_from(wallet: &Wallet<YC, YTDB, BP, BDB>) -> Result<Self, Self::Error> {
+        Ok(Self(TransactionBuilder::new(true, wallet)?))
+    }
+}
+
+impl<YTDB, BDB> SweepTransactionBuilder<YTDB, BDB>
+where
+    YTDB: YuvTransactionsStorage + Clone + Send + Sync + 'static,
+    BDB: bdk::database::BatchDatabase + Clone + Send,
+{
+    /// Override the fee rate strategy.
+    pub fn set_fee_rate_strategy(&mut self, fee_rate_strategy: FeeRateStrategy) -> &mut Self {
+        self.0.set_fee_rate_strategy(fee_rate_strategy);
+
+        self
+    }
+
+    /// Finish sweep building, and create a Bitcoin transaction.
+    /// If the address has no tweaked Bitcoin outputs, `None` is returned.
+    pub async fn finish(self, blockchain: &impl Blockchain) -> eyre::Result<Option<Transaction>> {
+        self.0.build_sweep(blockchain).await
+    }
 }
 
 pub struct IssuanceTransactionBuilder<YuvTxsDatabase, BitcoinTxsDatabase>(
@@ -204,7 +250,7 @@ where
     pub fn add_recipient(
         &mut self,
         recipient: &secp256k1::PublicKey,
-        amount: u64,
+        amount: u128,
         satoshis: u64,
     ) -> &mut Self {
         self.0.outputs.push(BuilderOutput::Pixel {
@@ -224,9 +270,19 @@ where
         self
     }
 
+    // Override spending tweaked satoshis
+    pub fn set_drain_tweaked_satoshis(&mut self, should_drain_tweaked_satoshis: bool) -> &mut Self {
+        self.0.should_drain_tweaked_satoshis = should_drain_tweaked_satoshis;
+        self
+    }
+
     /// Add satoshi recipient.
-    pub fn add_sats_recipient(&mut self, script_pubkey: Script, satoshis: u64) -> &mut Self {
-        self.0.add_sats_recipient(script_pubkey, satoshis);
+    pub fn add_sats_recipient(
+        &mut self,
+        recipient: &secp256k1::PublicKey,
+        satoshis: u64,
+    ) -> &mut Self {
+        self.0.add_sats_recipient(recipient, satoshis);
 
         self
     }
@@ -239,7 +295,7 @@ where
         &mut self,
         participants: Vec<secp256k1::PublicKey>,
         required_signatures: u8,
-        amount: u64,
+        amount: u128,
         satoshis: u64,
     ) -> &mut Self {
         self.0.add_multisig_recipient(
@@ -312,7 +368,7 @@ where
         &mut self,
         chroma: Chroma,
         recipient: &secp256k1::PublicKey,
-        amount: u64,
+        amount: u128,
         satoshis: u64,
     ) -> &mut Self {
         self.0.outputs.push(BuilderOutput::Pixel {
@@ -333,9 +389,19 @@ where
         self
     }
 
+    // Override spending tweaked satoshis
+    pub fn set_drain_tweaked_satoshis(&mut self, should_drain_tweaked_satoshis: bool) -> &mut Self {
+        self.0.should_drain_tweaked_satoshis = should_drain_tweaked_satoshis;
+        self
+    }
+
     /// Add satoshi recipient.
-    pub fn add_sats_recipient(&mut self, script_pubkey: Script, satoshis: u64) -> &mut Self {
-        self.0.add_sats_recipient(script_pubkey, satoshis);
+    pub fn add_sats_recipient(
+        &mut self,
+        recipient: &secp256k1::PublicKey,
+        satoshis: u64,
+    ) -> &mut Self {
+        self.0.add_sats_recipient(recipient, satoshis);
 
         self
     }
@@ -359,7 +425,7 @@ where
         &mut self,
         participants: Vec<secp256k1::PublicKey>,
         required_signatures: u8,
-        amount: u64,
+        amount: u128,
         chroma: Chroma,
         satoshis: u64,
     ) -> &mut Self {
@@ -444,6 +510,7 @@ where
             inputs: Vec::new(),
             tx_signer: TransactionSigner::new(ctx, wallet.signer_key),
             is_inputs_selected: false,
+            should_drain_tweaked_satoshis: false,
         })
     }
 }
@@ -490,10 +557,10 @@ where
         Ok(self)
     }
 
-    fn add_sats_recipient(&mut self, script_pubkey: Script, satoshis: u64) -> &mut Self {
+    fn add_sats_recipient(&mut self, recipient: &secp256k1::PublicKey, satoshis: u64) -> &mut Self {
         self.outputs.push(BuilderOutput::Satoshis {
             satoshis,
-            script_pubkey,
+            recipient: *recipient,
         });
 
         self
@@ -519,7 +586,7 @@ where
         &mut self,
         participants: Vec<secp256k1::PublicKey>,
         required_signatures: u8,
-        amount: u64,
+        amount: u128,
         chroma: Chroma,
         satoshis: u64,
     ) -> &mut Self {
@@ -544,6 +611,27 @@ where
     fn add_pixel_input(&mut self, outpoint: OutPoint) -> &mut Self {
         self.inputs.push(BuilderInput::Pixel { outpoint });
         self
+    }
+
+    fn add_tweaked_satoshi_inputs(&mut self) {
+        let tweaked_outputs = self
+            .yuv_utxos
+            .read()
+            .unwrap()
+            .iter()
+            .filter_map(|(outpoint, proof)| {
+                if proof.is_empty_pixelproof() {
+                    Some(*outpoint)
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<OutPoint>>();
+
+        for output in tweaked_outputs {
+            self.inputs
+                .push(BuilderInput::TweakedSatoshis { outpoint: output });
+        }
     }
 
     /// Set amount of satoshis that will be given to residual output for YUV coins.
@@ -572,9 +660,14 @@ where
             .get_fee_rate(blockchain)
             .wrap_err("failed to estimate fee")?;
 
-        if !self.is_issuance && !self.is_inputs_selected {
-            for chroma in &self.chromas.clone() {
-                self.fill_missing_amount(*chroma, fee_rate).await?;
+        if !self.is_inputs_selected {
+            if self.should_drain_tweaked_satoshis {
+                self.add_tweaked_satoshi_inputs();
+            }
+            if !self.is_issuance {
+                for chroma in &self.chromas.clone() {
+                    self.fill_missing_amount(*chroma).await?;
+                }
             }
         }
 
@@ -586,17 +679,13 @@ where
     ///
     /// Also will add to [`Self::outputs`] self-recipient for residual YUV coins
     /// if need so.
-    async fn fill_missing_amount(
-        &mut self,
-        chroma: Chroma,
-        fee_rate: BdkFeeRate,
-    ) -> eyre::Result<()> {
+    async fn fill_missing_amount(&mut self, chroma: Chroma) -> eyre::Result<()> {
         let output_sum = self
             .outputs
             .iter()
             .filter(|output| output.chroma() == Some(chroma))
             .map(|output| output.amount())
-            .sum::<u64>();
+            .sum::<u128>();
 
         let input_sum = self.inputs_sum(chroma).await?;
 
@@ -641,7 +730,6 @@ where
         let selection_result = YuvLargestFirstCoinSelection.coin_select(
             required_utxos,
             optional_utxos,
-            FeeRate::from_sat_per_vb(fee_rate.as_sat_per_vb()),
             target_amount,
             &Script::new(),
             chroma,
@@ -674,7 +762,7 @@ where
         Ok(())
     }
 
-    fn add_change_output(&mut self, chroma: Chroma, residual_amount: u64) -> eyre::Result<()> {
+    fn add_change_output(&mut self, chroma: Chroma, residual_amount: u128) -> eyre::Result<()> {
         debug_assert!(residual_amount > 0, "Residual amount is zero");
 
         let ctx = Secp256k1::new();
@@ -689,8 +777,8 @@ where
         Ok(())
     }
 
-    async fn inputs_sum(&self, chroma: Chroma) -> eyre::Result<u64> {
-        let mut sum = 0u64;
+    async fn inputs_sum(&self, chroma: Chroma) -> eyre::Result<u128> {
+        let mut sum = 0u128;
 
         for input in &self.inputs {
             let (proof, _output) = self.get_output_from_storage(input.outpoint()).await?;
@@ -712,7 +800,7 @@ where
         &self,
         OutPoint { txid, vout }: OutPoint,
     ) -> eyre::Result<(PixelProof, TxOut)> {
-        let Some(tx) = self.yuv_txs_storage.get_yuv_tx(txid).await? else {
+        let Some(tx) = self.yuv_txs_storage.get_yuv_tx(&txid).await? else {
             bail!("Transaction is not found in synced YUV txs: {}", txid);
         };
 
@@ -755,7 +843,7 @@ where
                     txout: YuvTxOut {
                         satoshis: output.value,
                         script_pubkey: output.script_pubkey,
-                        pixel: *pixel,
+                        pixel,
                     },
                     keychain: crate::types::KeychainKind::External,
                     is_spent: false,
@@ -775,6 +863,135 @@ where
         self.is_inputs_selected = true;
     }
 
+    /// Inserts empty pixel proofs to the outputs that don't hold any Pixel data,
+    /// i.e. to the Satoshis only outputs.
+    ///
+    /// The output `script_pubkey` is also tweaked with an empty pixel, so the method
+    /// creates wrapped satoshis that can be spent after sweeping them to a p2wpkh address.
+    fn insert_empty_pixelproofs(
+        &self,
+        output_proofs: &mut Vec<PixelProof>,
+        tx_outs: &mut [TxOut],
+    ) -> eyre::Result<()> {
+        let ctx = Secp256k1::new();
+
+        // If the tx is an issuance, the first output is `OP_RETURN`, so the offset should be increased.
+        let offset = if self.is_issuance {
+            output_proofs.len() + 1
+        } else {
+            output_proofs.len()
+        };
+
+        tx_outs.iter_mut().skip(offset).for_each(|tx_out| {
+            let (pixel_proof, script_pubkey) = get_empty_pixel_proof(
+                self.private_key
+                    .public_key(&ctx)
+                    .even_public_key(&ctx)
+                    .inner,
+            )
+            .expect("Failed to get empty pixelproof");
+
+            output_proofs.push(pixel_proof);
+            tx_out.script_pubkey = script_pubkey;
+        });
+
+        Ok(())
+    }
+
+    async fn build_sweep(
+        mut self,
+        blockchain: &impl Blockchain,
+    ) -> eyre::Result<Option<Transaction>> {
+        let fee_rate = self
+            .fee_rate_strategy
+            .get_fee_rate(blockchain)
+            .wrap_err("failed to estimate fee")?;
+        let ctx = Secp256k1::new();
+
+        // Get the tweaked UTXOs.
+        let mut tweaked_outputs = self
+            .yuv_utxos
+            .read()
+            .unwrap()
+            .iter()
+            .filter(|utxo| utxo.1.is_empty_pixelproof())
+            .map(|(outpoint, proof)| (*outpoint, proof.clone()))
+            .collect::<HashMap<OutPoint, PixelProof>>();
+
+        // If there are no tweaked UTXOs, then exit.
+        if tweaked_outputs.is_empty() {
+            return Ok(None);
+        }
+
+        for outpoint in tweaked_outputs.keys() {
+            self.inputs.push(BuilderInput::TweakedSatoshis {
+                outpoint: *outpoint,
+            })
+        }
+
+        let mut inputs = Vec::new();
+        self.process_inputs(&ctx, &mut tweaked_outputs, &mut inputs)
+            .await?;
+
+        let bitcoin_wallet = self.inner_wallet.read().unwrap();
+        let mut tx_builder = bitcoin_wallet.build_tx();
+        tx_builder.only_witness_utxo();
+        tx_builder.fee_rate(fee_rate);
+
+        for (outpoint, psbt_input, weight) in &inputs {
+            tx_builder.add_foreign_utxo(*outpoint, psbt_input.clone(), *weight)?;
+        }
+
+        // Calculate the inputs sum and fee.
+        let mut inputs_sum = 0;
+        let mut total_weight = inputs[0].2;
+        for (outpoint, _, weight) in inputs {
+            let tx = blockchain
+                .get_tx(&outpoint.txid)?
+                .ok_or_else(|| eyre!("Transaction {} was not found", outpoint.txid))?;
+
+            let output = &tx.output.get(outpoint.vout as usize).ok_or_else(|| {
+                eyre!(
+                    "Transaction {} doesn't contain vout {}",
+                    outpoint.txid,
+                    outpoint.vout
+                )
+            })?;
+
+            inputs_sum += output.value;
+            total_weight += weight;
+        }
+
+        let fee = fee_rate.as_sat_per_vb() as u64 * total_weight as u64;
+        let output_sum = inputs_sum - fee;
+
+        let pubkey = self.private_key.public_key(&ctx);
+        let script_pubkey = Script::new_v0_p2wpkh(&pubkey.wpubkey_hash().unwrap());
+
+        tx_builder.add_recipient(script_pubkey, output_sum);
+
+        let (mut psbt, _details) = tx_builder.finish()?;
+
+        bitcoin_wallet.sign(
+            &mut psbt,
+            SignOptions {
+                try_finalize: true,
+                trust_witness_utxo: true,
+                ..Default::default()
+            },
+        )?;
+
+        let input_proofs = tweaked_outputs
+            .iter()
+            .enumerate()
+            .map(|(i, (_, proof))| (i as u32, proof.clone()))
+            .collect::<ProofMap>();
+
+        self.tx_signer.sign(&mut psbt, &input_proofs)?;
+
+        Ok(Some(psbt.extract_tx()))
+    }
+
     async fn build_tx(mut self, fee_rate: BdkFeeRate) -> eyre::Result<YuvTransaction> {
         let ctx = Secp256k1::new();
 
@@ -785,7 +1002,6 @@ where
         for output in &self.outputs {
             self.process_output(output, &mut output_proofs, &mut outputs)?;
         }
-
         // Gather inputs as foreighn utxos with proofs for BDK wallet.
         let mut input_proofs = HashMap::new();
         let mut inputs = Vec::new();
@@ -800,6 +1016,11 @@ where
         tx_builder.only_witness_utxo();
         tx_builder.fee_rate(fee_rate);
 
+        if self.is_issuance {
+            let announcement = form_issue_announcement(output_proofs.clone())?;
+
+            tx_builder.add_recipient(announcement.to_script(), 1000);
+        }
         // Fill tx_builder with formed inputs and outputs
         for (script_pubkey, amount) in outputs {
             tx_builder.add_recipient(script_pubkey, amount);
@@ -812,6 +1033,15 @@ where
         // of Bitcoin.
         let (mut psbt, _details) = tx_builder.finish()?;
 
+        self.insert_empty_pixelproofs(&mut output_proofs, &mut psbt.unsigned_tx.output)?;
+
+        let tx_type = form_tx_type(
+            &psbt.unsigned_tx,
+            input_proofs,
+            &output_proofs,
+            self.is_issuance,
+        )?;
+
         // Sign non YUV inputs with BDK wallet.
         bitcoin_wallet.sign(
             &mut psbt,
@@ -821,13 +1051,6 @@ where
                 ..Default::default()
             },
         )?;
-
-        let tx_type = form_tx_type(
-            &psbt.unsigned_tx,
-            input_proofs,
-            output_proofs,
-            self.is_issuance,
-        );
 
         // We need to sign inputs only in case of transfer transaction as there
         // is no inputs in issuance transaction.
@@ -919,6 +1142,11 @@ where
 
                 descriptor!(wpkh(tweaked_pubkey))?
             }
+            BuilderInput::TweakedSatoshis { .. } => {
+                let tweaked_pubkey = PixelKey::new_with_ctx(Pixel::empty(), &pubkey1.inner, ctx)?;
+
+                descriptor!(wpkh(tweaked_pubkey))?
+            }
             BuilderInput::Multisig2x2 {
                 second_signer_key, ..
             } => {
@@ -952,8 +1180,13 @@ where
             // For satoshis output no addtion processing is required
             BuilderOutput::Satoshis {
                 satoshis,
-                script_pubkey,
-            } => (script_pubkey.clone(), *satoshis),
+                recipient,
+            } => {
+                let (pixel_proof, script_pubkey) = get_empty_pixel_proof(*recipient)?;
+
+                output_proofs.push(pixel_proof);
+                (script_pubkey.clone(), *satoshis)
+            }
             // For pixel, form script and push proof of it to the list
             BuilderOutput::Pixel {
                 chroma,
@@ -966,7 +1199,7 @@ where
 
                 let pubkey_hash = &pixel_key
                     .wpubkey_hash()
-                    .ok_or_else(|| eyre!("Pixel key is not compressed"))?;
+                    .ok_or_eyre("Pixel key is not compressed")?;
 
                 let script_pubkey = Script::new_v0_p2wpkh(pubkey_hash);
 
@@ -1036,6 +1269,28 @@ where
     }
 }
 
+pub fn form_issue_announcement(output_proofs: Vec<PixelProof>) -> eyre::Result<IssueAnnouncement> {
+    let filtered_proofs = output_proofs
+        .into_iter()
+        .filter(|proof| !proof.is_empty_pixelproof())
+        .collect::<Vec<PixelProof>>();
+
+    let chroma = filtered_proofs
+        .first()
+        .map(|proof| proof.pixel().chroma)
+        .ok_or_eyre("issuance with no outputs")?;
+
+    let outputs_sum = filtered_proofs
+        .iter()
+        .map(|proof| proof.pixel().luma.amount)
+        .sum::<u128>();
+
+    Ok(IssueAnnouncement {
+        chroma,
+        amount: outputs_sum,
+    })
+}
+
 /// Sort private keys by public keys and tweak first one.
 fn sort_and_tweak(
     ctx: &Secp256k1<All>,
@@ -1055,12 +1310,28 @@ fn sort_and_tweak(
     Ok((key1_tweaked, public_key2))
 }
 
+/// Generate an empty pixel proof using the given `PublicKey` and an empty `Pixel`.
+fn get_empty_pixel_proof(recipient: secp256k1::PublicKey) -> eyre::Result<(PixelProof, Script)> {
+    let pixel_key = PixelKey::new(Pixel::empty(), &recipient)?;
+
+    let pubkey_hash = &pixel_key
+        .wpubkey_hash()
+        .ok_or_eyre("Pixel key is not compressed")?;
+
+    let script_pubkey = Script::new_v0_p2wpkh(pubkey_hash);
+
+    Ok((
+        PixelProof::EmptyPixel(EmptyPixelProof::new(recipient)),
+        script_pubkey,
+    ))
+}
+
 fn form_tx_type(
     unsigned_tx: &Transaction,
     input_proofs: HashMap<OutPoint, PixelProof>,
-    output_proofs: Vec<PixelProof>,
+    output_proofs: &[PixelProof],
     is_issuance: bool,
-) -> YuvTxType {
+) -> eyre::Result<YuvTxType> {
     let mut mapped_input_proofs = BTreeMap::new();
 
     for (index, input) in unsigned_tx.input.iter().enumerate() {
@@ -1071,20 +1342,29 @@ fn form_tx_type(
         mapped_input_proofs.insert(index as u32, input_proof.clone());
     }
 
+    let offset = if is_issuance { 1 } else { 0 };
     let output_proofs = output_proofs
-        .into_iter()
+        .iter()
         .enumerate()
-        .map(|(index, proof)| (index as u32, proof))
-        .collect();
+        .map(|(index, proof)| ((index + offset) as u32, proof.clone()))
+        .collect::<BTreeMap<u32, PixelProof>>();
 
-    if is_issuance {
-        YuvTxType::Issue { output_proofs }
+    let tx_type = if is_issuance {
+        let issue_announcement =
+            form_issue_announcement(output_proofs.clone().into_values().collect())?;
+
+        YuvTxType::Issue {
+            output_proofs: Some(output_proofs),
+            announcement: issue_announcement,
+        }
     } else {
         YuvTxType::Transfer {
             input_proofs: mapped_input_proofs,
             output_proofs,
         }
-    }
+    };
+
+    Ok(tx_type)
 }
 
 #[cfg(test)]

@@ -18,7 +18,7 @@ mod vec_ops;
 mod wip;
 
 /// Generate a range proof for a value with a blinding factor.
-pub fn generate(value: u64, blinding: [u8; 32]) -> (RangeProof, ProjectivePoint) {
+pub fn generate(value: u128, blinding: [u8; 32]) -> (RangeProof, ProjectivePoint) {
     let blinding =
         Scalar::from_repr(*FieldBytes::from_slice(&blinding)).expect("blinding is a valid scalar");
 
@@ -33,7 +33,7 @@ pub fn verify(commit: ProjectivePoint, proof: RangeProof) -> bool {
 /// Commit to a value with a blinding factor.
 ///
 /// v * G + r * H
-pub fn commit(value: u64, blinding: [u8; 32]) -> ProjectivePoint {
+pub fn commit(value: u128, blinding: [u8; 32]) -> ProjectivePoint {
     let v = Scalar::from(value);
     let r =
         Scalar::from_repr(*FieldBytes::from_slice(&blinding)).expect("blinding is a valid scalar");

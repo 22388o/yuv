@@ -1,5 +1,5 @@
 [package]
-name        = "yuv-tx-attach"
+name = "yuv-tx-attach"
 description = "YUV Protocol's transactions attach module"
 version.workspace = true
 edition.workspace = true
@@ -10,21 +10,22 @@ repository.workspace = true
 bulletproof = ["yuv-tx-check/bulletproof", "yuv-pixels/bulletproof"]
 
 [dependencies]
-event-bus      = { path = "../event-bus" }
-yuv-types      = { path = "../types", features = ["messages"] }
-yuv-storage    = { path = "../storage"}
-yuv-tx-check   = { path = "../tx-check" }
-bitcoin-client = { path = "../bitcoin-client"}
+event-bus = { path = "../event-bus" }
+yuv-types = { path = "../types", features = ["messages"] }
+yuv-pixels = { path = "../pixels" }
+yuv-storage = { path = "../storage" }
+yuv-tx-check = { path = "../tx-check" }
+bitcoin-client = { path = "../bitcoin-client" }
 
-thiserror     = { workspace = true}
-tokio         = { workspace = true}
-tokio-util    = { workspace = true}
-bitcoin       = { workspace = true}
-tracing       = { workspace = true}
-eyre          = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+bitcoin = { workspace = true }
+tracing = { workspace = true }
+eyre = { workspace = true }
 
 [dev-dependencies]
-yuv-pixels = { path = "../pixels"}
-tokio      = { workspace = true, features = ["test-util", "macros"] }
-once_cell  = { version = "1.18.0"}
+yuv-pixels = { path = "../pixels" }
+tokio = { workspace = true, features = ["test-util", "macros"] }
+once_cell = { version = "1.18.0" }
 tokio-test = "0.4.3"

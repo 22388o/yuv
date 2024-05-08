@@ -2,12 +2,12 @@
 mod traits;
 pub use traits::KeyValueError;
 pub use traits::{
-    BlockIndexerStorage, FrozenTxsStorage, InvalidTxsStorage, InventoryStorage, KeyValueResult,
-    KeyValueStorage, PagesNumberStorage, PagesStorage, TransactionsStorage,
+    BlockIndexerStorage, ChromaInfoStorage, FrozenTxsStorage, InvalidTxsStorage, InventoryStorage,
+    KeyValueResult, KeyValueStorage, PagesNumberStorage, PagesStorage, TransactionsStorage,
 };
 
 mod txstates;
-pub use txstates::TxStatesStorage;
+pub use txstates::{TxState, TxStatesStorage};
 
 mod impls;
 #[cfg(feature = "leveldb")]

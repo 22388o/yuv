@@ -121,6 +121,7 @@ impl From<ChromaParseError> for PixelParseError {
 
 #[derive(Debug)]
 pub enum PixelProofError {
+    EmptyPixelProofError(EmptyPixelProofError),
     SigPixelProofError(SigPixelProofError),
     MultisigPixelProofError(MultisigPixelProofError),
     LightningCommitmentProofError(LightningCommitmentProofError),
@@ -142,6 +143,7 @@ impl Display for PixelProofError {
             #[cfg(feature = "bulletproof")]
             PixelProofError::BulletproofError(e) => write!(f, "BulletproofError: {}", e),
             PixelProofError::LightningHtlcError(e) => write!(f, "LightningHtlcError: {}", e),
+            PixelProofError::EmptyPixelProofError(e) => write!(f, "EmptyPixelProofError: {}", e),
         }
     }
 }
@@ -156,6 +158,7 @@ impl std::error::Error for PixelProofError {
             #[cfg(feature = "bulletproof")]
             PixelProofError::BulletproofError(e) => Some(e),
             PixelProofError::LightningHtlcError(e) => Some(e),
+            PixelProofError::EmptyPixelProofError(e) => Some(e),
         }
     }
 }
@@ -163,6 +166,12 @@ impl std::error::Error for PixelProofError {
 impl From<SigPixelProofError> for PixelProofError {
     fn from(err: SigPixelProofError) -> Self {
         PixelProofError::SigPixelProofError(err)
+    }
+}
+
+impl From<EmptyPixelProofError> for PixelProofError {
+    fn from(err: EmptyPixelProofError) -> Self {
+        PixelProofError::EmptyPixelProofError(err)
     }
 }
 
@@ -182,6 +191,61 @@ impl From<LightningCommitmentProofError> for PixelProofError {
 impl From<BulletproofError> for PixelProofError {
     fn from(err: BulletproofError) -> Self {
         PixelProofError::BulletproofError(err)
+    }
+}
+
+#[derive(Debug)]
+pub enum EmptyPixelProofError {
+    InvalidScript(Script, Script),
+    P2wkhWitnessParseError(P2WPKHWitnessParseError),
+    InvalidWitnessPublicKey(Box<PublicKey>, Box<PublicKey>),
+    PixelKeyError(PixelKeyError),
+}
+
+impl Display for EmptyPixelProofError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            EmptyPixelProofError::InvalidScript(script, expected) => {
+                write!(f, "Invalid script: {}, expected: {}", script, expected)
+            }
+            EmptyPixelProofError::InvalidWitnessPublicKey(witness, expected) => {
+                write!(
+                    f,
+                    "Invalid public key in witness: {}, expected: {}",
+                    witness, expected
+                )
+            }
+            EmptyPixelProofError::P2wkhWitnessParseError(e) => {
+                write!(f, "Failed to parse witness: {}", e)
+            }
+            EmptyPixelProofError::PixelKeyError(e) => {
+                write!(f, "Failed to create pixel key: {}", e)
+            }
+        }
+    }
+}
+
+#[cfg(not(feature = "no-std"))]
+impl std::error::Error for EmptyPixelProofError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            EmptyPixelProofError::InvalidScript(_, _) => None,
+            EmptyPixelProofError::InvalidWitnessPublicKey(_, _) => None,
+            EmptyPixelProofError::P2wkhWitnessParseError(e) => Some(e),
+            EmptyPixelProofError::PixelKeyError(e) => Some(e),
+        }
+    }
+}
+
+impl From<PixelKeyError> for EmptyPixelProofError {
+    fn from(err: PixelKeyError) -> Self {
+        EmptyPixelProofError::PixelKeyError(err)
+    }
+}
+
+impl From<P2WPKHWitnessParseError> for EmptyPixelProofError {
+    fn from(err: P2WPKHWitnessParseError) -> Self {
+        EmptyPixelProofError::P2wkhWitnessParseError(err)
     }
 }
 

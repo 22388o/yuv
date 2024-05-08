@@ -11,3 +11,5 @@ pub mod json;
 mod queryable;
 
 pub use jsonrpc_async::Error as JsonRpcError;
+
+pub mod constants;

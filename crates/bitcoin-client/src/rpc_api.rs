@@ -8,7 +8,10 @@ use serde::*;
 use std::collections::HashMap;
 use std::iter::FromIterator;
 
-use crate::{json, queryable, Error, Result};
+use crate::{
+    constants::{BITCOIN_CORE_RPC_V24, BITCOIN_CORE_RPC_V25},
+    json, queryable, Error, Result,
+};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct JsonOutPoint {
@@ -1363,6 +1366,9 @@ pub trait RpcApi: Sized {
     }
     /// Submit a raw transaction to the Bitcoin network.
     ///
+    /// This method is available since Bitcoin Core 0.25.0,
+    /// but this function is backward compatible.
+    ///
     /// # Arguments
     ///
     /// 1. `max_fee_rate` -  Reject transactions whose fee rate is higher than the specified value,
@@ -1372,7 +1378,7 @@ pub trait RpcApi: Sized {
     /// expressed in BTC. If burning funds through unspendable outputs is desired, increase this
     /// value. This check is based on heuristics and does not guarantee spendability of outputs.
     ///
-    /// Use [`Self::send_raw_transaction`] for default option params.
+    /// Use None to set default values (0.0)
     ///
     /// For more information see
     /// <https://bitcoincore.org/en/doc/26.0.0/rpc/rawtransactions/sendrawtransaction/>
@@ -1380,20 +1386,29 @@ pub trait RpcApi: Sized {
         &self,
         tx: R,
         max_fee_rate: Option<f32>,
-        max_burn_amount: f64,
+        max_burn_amount: Option<f64>,
     ) -> Result<bitcoin::Txid>
     where
         R: Sync + Send,
     {
-        self.call(
-            "sendrawtransaction",
-            &[
-                tx.raw_hex().into(),
-                max_fee_rate.unwrap_or(0.0).into(),
-                max_burn_amount.into(),
-            ],
-        )
-        .await
+        match self.get_network_info().await?.version {
+            ..=BITCOIN_CORE_RPC_V24 => {
+                self.call("sendrawtransaction", &[tx.raw_hex().into()])
+                    .await
+            }
+            BITCOIN_CORE_RPC_V25.. => {
+                self.call(
+                    "sendrawtransaction",
+                    &[
+                        tx.raw_hex().into(),
+                        max_fee_rate.unwrap_or(0.0).into(),
+                        max_burn_amount.unwrap_or(0.0).into(),
+                    ],
+                )
+                .await
+            }
+            _ => Err(Error::UnsupportedVersion),
+        }
     }
 
     /// Estimates the approximate fee per kilobyte needed for a transaction to begin confirmation

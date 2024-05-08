@@ -377,7 +377,7 @@ fn sync_points(
     transcript.append_message(b"a", a.to_bytes().as_ref());
     transcript.append_message(b"b", b.to_bytes().as_ref());
 
-    let mut raw_e = [0u8; 64];
+    let mut raw_e = [0u8; 128];
     transcript.challenge_bytes(b"e", &mut raw_e);
 
     hash_to_point(&raw_e)

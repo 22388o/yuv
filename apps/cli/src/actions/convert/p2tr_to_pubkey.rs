@@ -5,8 +5,7 @@ use yuv_pixels::Chroma;
 #[derive(Args, Debug)]
 pub struct P2trToPubkeyArgs {
     /// A Taproot address to be converted to a public key.
-    #[clap(long, short)]
-    #[arg(value_parser = Chroma::from_address)]
+    #[clap(long, short, value_parser = Chroma::from_address)]
     pub address: Chroma,
 }
 

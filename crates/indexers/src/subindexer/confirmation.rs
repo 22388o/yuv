@@ -25,8 +25,7 @@ where
     max_confirmation_time: Duration,
 }
 
-/// Number of confiramations that is required to consider transaction as
-/// confirmed.
+/// Number of confirmations that is required to consider transaction as confirmed.
 const MIN_CONFIRMATIONS: u32 = 1;
 
 impl<BC> ConfirmationIndexer<BC>

@@ -4,9 +4,10 @@ use bitcoin::{EcdsaSig, OutPoint, PackedLockTime, Script, Transaction, TxIn, TxO
 use lazy_static::lazy_static;
 use std::collections::BTreeMap;
 use std::str::FromStr;
-use yuv_pixels::{Pixel, PixelKey, PixelProof};
+use yuv_pixels::{Chroma, Pixel, PixelKey, PixelProof};
+use yuv_types::announcements::IssueAnnouncement;
 use yuv_types::YuvTxType::Transfer;
-use yuv_types::{FreezeTxToggle, YuvTransaction, YuvTxType};
+use yuv_types::{announcements::FreezeAnnouncement, ProofMap, YuvTransaction, YuvTxType};
 
 lazy_static! {
     static ref TXID: Txid = {
@@ -155,6 +156,8 @@ fn add_witness(
 
 /// Generate random issuance tx
 fn new_issuance_tx(pubkey: PublicKey, seckkey: SecretKey) -> YuvTransaction {
+    let proofs = vec![new_pixel_proof(pubkey, 100)];
+    let announcement = IssueAnnouncement::new(Chroma::from(pubkey.x_only_public_key().0), 100);
     let mut tx = new_yuv_tx(
         vec![TxIn::default()],
         vec![TxOut {
@@ -162,7 +165,8 @@ fn new_issuance_tx(pubkey: PublicKey, seckkey: SecretKey) -> YuvTransaction {
             script_pubkey: new_pixel_script_pub_key(pubkey, 100),
         }],
         YuvTxType::Issue {
-            output_proofs: new_proof(vec![new_pixel_proof(pubkey, 100)]),
+            output_proofs: Some(new_proof(proofs)),
+            announcement,
         },
     );
 
@@ -199,15 +203,14 @@ fn new_transfer_tx(pubkey: PublicKey, seckey: SecretKey, txid: Txid) -> YuvTrans
 
 /// Generate random freeze tx
 fn new_freeze_tx(pubkey: PublicKey, txid_for_freeze: Txid) -> YuvTransaction {
+    let freeze_announcement = FreezeAnnouncement::new(OutPoint::new(txid_for_freeze, 0)).into();
     new_yuv_tx(
         vec![TxIn::default()],
         vec![TxOut {
             value: 10000,
             script_pubkey: new_pixel_script_pub_key(pubkey, 100),
         }],
-        YuvTxType::FreezeToggle {
-            freezes: vec![FreezeTxToggle::new(txid_for_freeze, 0)],
-        },
+        YuvTxType::Announcement(freeze_announcement),
     )
 }
 
@@ -225,7 +228,7 @@ pub fn new_yuv_tx(inputs: Vec<TxIn>, outputs: Vec<TxOut>, tx_type: YuvTxType) ->
 }
 
 /// Generate new proof
-pub fn new_proof(proofs: Vec<PixelProof>) -> BTreeMap<u32, PixelProof> {
+pub fn new_proof(proofs: Vec<PixelProof>) -> ProofMap {
     let mut map = BTreeMap::new();
 
     for (ind, proof) in proofs.iter().enumerate() {
@@ -236,7 +239,7 @@ pub fn new_proof(proofs: Vec<PixelProof>) -> BTreeMap<u32, PixelProof> {
 }
 
 /// Generate new pixel script pub key
-pub fn new_pixel_script_pub_key(pubkey: PublicKey, amount: u64) -> Script {
+pub fn new_pixel_script_pub_key(pubkey: PublicKey, amount: u128) -> Script {
     let (xonly, _parity) = pubkey.x_only_public_key();
 
     let pixel = Pixel::new(amount, xonly);
@@ -245,7 +248,7 @@ pub fn new_pixel_script_pub_key(pubkey: PublicKey, amount: u64) -> Script {
 }
 
 /// Generate new pixel proof
-pub fn new_pixel_proof(pubkey: PublicKey, amount: u64) -> PixelProof {
+pub fn new_pixel_proof(pubkey: PublicKey, amount: u128) -> PixelProof {
     let (xonly, _parity) = pubkey.x_only_public_key();
 
     PixelProof::sig(Pixel::new(amount, xonly), pubkey)

@@ -1,6 +1,6 @@
 use clap::Args;
 
-#[derive(Args, Debug)]
+#[derive(Clone, Args, Debug)]
 pub struct RpcArgs {
     /// RPC URL to the Bitcoin node. It's required only in case, when `bitcoin_provider`
     /// in the configuration file is specified to Esplora.

@@ -3,7 +3,7 @@
 Provides traits and implementations of storage for YUV transactions. For default
 use case it is a wrapper around `LevelDB` database, for tests - in-memory storage.
 
-All the types that come through the storage are serialized using `serde_cbor`.
+All the types that come through the storage are serialized using `ciborium`.
 
 Example of using the [InventoryStorage](src/traits/inventory.rs):
 

@@ -1,7 +1,7 @@
 //! This intergration test checks that flow from `yuv-cli` documentation works
 //! as expected.
 
-use bdk::bitcoin::{secp256k1::Secp256k1, OutPoint, PrivateKey, Script};
+use bdk::bitcoin::{secp256k1::Secp256k1, OutPoint, PrivateKey};
 use bdk::bitcoincore_rpc::RpcApi;
 use bdk::miniscript::ToPublicKey;
 use once_cell::sync::Lazy;
@@ -58,9 +58,10 @@ async fn test_cli_flow() -> eyre::Result<()> {
     rpc_blockchain.generate_to_address(101, &usd_issuer.address()?)?;
     usd_issuer.sync(SyncOptions::default()).await?;
 
-    const ISSUANCE_AMOUNT: u64 = 10_000;
+    const ISSUANCE_AMOUNT: u128 = 10_000;
 
     let alice_pubkey = ALICE.public_key(&secp);
+    let eur_pubkey = EUR_ISSUER.public_key(&secp);
 
     let fee_rate_strategy = FeeRateStrategy::Manual { fee_rate: 2.0 };
 
@@ -70,18 +71,12 @@ async fn test_cli_flow() -> eyre::Result<()> {
     let usd_issuance = {
         let mut builder = usd_issuer.build_issuance()?;
 
-        let alice_script_pubkey =
-            Script::new_v0_p2wpkh(&alice.public_key().wpubkey_hash().unwrap());
-
-        let eur_script_pubkey =
-            Script::new_v0_p2wpkh(&eur_issuer.public_key().wpubkey_hash().unwrap());
-
         builder
             .add_recipient(&alice_pubkey.inner, ISSUANCE_AMOUNT, 1000)
             // Fund alice with 10_000 sats
-            .add_sats_recipient(alice_script_pubkey, 10_000)
+            .add_sats_recipient(&alice_pubkey.inner, 10_000)
             // Fund eur issuer with 10_000 sats for further issuance
-            .add_sats_recipient(eur_script_pubkey, 10_000)
+            .add_sats_recipient(&eur_pubkey.inner, 10_000)
             .set_fee_rate_strategy(fee_rate_strategy);
 
         builder.finish(&blockchain).await?
@@ -94,7 +89,7 @@ async fn test_cli_flow() -> eyre::Result<()> {
 
     let usd_txid = usd_issuance.bitcoin_tx.txid();
 
-    yuv_client.send_raw_yuv_tx(usd_issuance).await?;
+    yuv_client.send_raw_yuv_tx(usd_issuance, None).await?;
 
     // Add block with issuance to the chain
     rpc_blockchain.generate_to_address(7, &alice.address()?)?;
@@ -125,7 +120,7 @@ async fn test_cli_flow() -> eyre::Result<()> {
 
     let eur_txid = eur_issuance.bitcoin_tx.txid();
 
-    yuv_client.send_raw_yuv_tx(eur_issuance).await?;
+    yuv_client.send_raw_yuv_tx(eur_issuance, None).await?;
 
     // Add block with issuance to the chain
     rpc_blockchain.generate_to_address(7, &alice.address()?)?;
@@ -142,7 +137,7 @@ async fn test_cli_flow() -> eyre::Result<()> {
 
     let bob_pubkey = BOB.public_key(&secp);
 
-    const TRANSFER_AMOUNT: u64 = 100;
+    const TRANSFER_AMOUNT: u128 = 100;
 
     // =============================
     // 3. Transfer USD tokens from ALICE to BOB
@@ -166,7 +161,7 @@ async fn test_cli_flow() -> eyre::Result<()> {
 
     let txid = alice_bob_transfer.bitcoin_tx.txid();
 
-    yuv_client.send_raw_yuv_tx(alice_bob_transfer).await?;
+    yuv_client.send_raw_yuv_tx(alice_bob_transfer, None).await?;
 
     // Add block with transfer to the chain
     rpc_blockchain.generate_to_address(7, &alice.address()?)?;
@@ -183,7 +178,7 @@ async fn test_cli_flow() -> eyre::Result<()> {
 }
 
 pub fn find_in_utxos(wallet: &MemoryWallet, outpoint: OutPoint) -> eyre::Result<()> {
-    let utxos = wallet.utxos();
+    let utxos = wallet.yuv_utxos();
 
     let _utxo = utxos
         .iter()

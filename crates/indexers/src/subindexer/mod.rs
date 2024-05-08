@@ -1,13 +1,13 @@
 //! This module provides interface for sub-indexers, and some implementations.
 
-use async_trait::async_trait;
+pub use async_trait::async_trait;
 
-mod freeze;
+pub use announcement::AnnouncementsIndexer;
 use bitcoin_client::json::GetBlockTxResult;
-pub use freeze::FreezesIndexer;
-
-mod confirmation;
 pub use confirmation::ConfirmationIndexer;
+
+mod announcement;
+mod confirmation;
 
 /// Represents a sub-indexer, which is responsible for indexing a specific items
 /// from a block.

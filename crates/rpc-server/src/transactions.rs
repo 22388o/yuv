@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use bitcoin::{OutPoint, Txid};
+use bitcoin::{Amount, OutPoint, Txid};
 use bitcoin_client::BitcoinRpcApi;
 use event_bus::{typeid, EventBus};
 use jsonrpsee::{
@@ -10,42 +10,47 @@ use jsonrpsee::{
     },
 };
 use std::sync::Arc;
+use yuv_pixels::Chroma;
 use yuv_rpc_api::transactions::{
     EmulateYuvTransactionResponse, GetRawYuvTransactionResponse, YuvTransactionsRpcServer,
 };
 use yuv_storage::{
-    FrozenTxsStorage, KeyValueError, PagesStorage, TransactionsStorage, TxStatesStorage,
+    ChromaInfoStorage, FrozenTxsStorage, KeyValueError, PagesStorage, TransactionsStorage, TxState,
+    TxStatesStorage,
 };
 use yuv_tx_check::{check_transaction, CheckError};
-use yuv_types::{ControllerMessage, ProofMap, TxState, YuvTransaction, YuvTxType};
+use yuv_types::{
+    announcements::ChromaInfo, ControllerMessage, ProofMap, YuvTransaction, YuvTxType,
+};
 
+// TODO: Rename to "RpcController"
 /// Controller for transactions from RPC.
-pub struct TransactionsController<TXS, FZS, BC> {
+pub struct TransactionsController<TransactionsStorage, AnnouncementStorage, BitcoinClient> {
     /// Max items per request
     max_items_per_request: usize,
     /// Internal storage of transactions.
-    txs_storage: TXS,
-    /// Internal storage of frozen transactions.
-    frozen_txs_storage: FZS,
+    txs_storage: TransactionsStorage,
+    /// Internal storage for announcements.
+    announcement_storage: AnnouncementStorage,
     /// Event bus for simplifying communication with services.
     event_bus: EventBus,
     /// Internal storage of transactions' states.
     txs_states_storage: TxStatesStorage,
     /// Bitcoin RPC Client.
-    bitcoin_client: Arc<BC>,
+    bitcoin_client: Arc<BitcoinClient>,
 }
 
-impl<TXS, FZS, BC> TransactionsController<TXS, FZS, BC>
+impl<TXS, AS, BC> TransactionsController<TXS, AS, BC>
 where
     TXS: TransactionsStorage + PagesStorage + Send + Sync + 'static,
-    FZS: FrozenTxsStorage + Send + Sync + 'static,
+    AS: FrozenTxsStorage + ChromaInfoStorage + Send + Sync + 'static,
     BC: BitcoinRpcApi + Send + Sync + 'static,
 {
     pub fn new(
         storage: TXS,
         full_event_bus: EventBus,
         txs_states_storage: TxStatesStorage,
-        frozen_txs_storage: FZS,
+        frozen_txs_storage: AS,
         bitcoin_client: Arc<BC>,
         max_items_per_request: usize,
     ) -> Self {
@@ -58,7 +63,7 @@ where
             txs_storage: storage,
             event_bus,
             txs_states_storage,
-            frozen_txs_storage,
+            announcement_storage: frozen_txs_storage,
             bitcoin_client,
         }
     }
@@ -67,7 +72,7 @@ where
 impl<TXS, FZS, BC> TransactionsController<TXS, FZS, BC>
 where
     TXS: TransactionsStorage + PagesStorage + Send + Sync + 'static,
-    FZS: FrozenTxsStorage + Send + Sync + 'static,
+    FZS: FrozenTxsStorage + ChromaInfoStorage + Send + Sync + 'static,
     BC: BitcoinRpcApi + Send + Sync + 'static,
 {
     async fn send_txs_to_confirm(&self, yuv_txs: Vec<YuvTransaction>) -> RpcResult<()> {
@@ -90,10 +95,10 @@ where
 }
 
 #[async_trait]
-impl<TXS, FZS, BC> YuvTransactionsRpcServer for TransactionsController<TXS, FZS, BC>
+impl<TXS, AS, BC> YuvTransactionsRpcServer for TransactionsController<TXS, AS, BC>
 where
     TXS: TransactionsStorage + PagesStorage + Clone + Send + Sync + 'static,
-    FZS: FrozenTxsStorage + Clone + Send + Sync + 'static,
+    AS: FrozenTxsStorage + ChromaInfoStorage + Clone + Send + Sync + 'static,
     BC: BitcoinRpcApi + Send + Sync + 'static,
 {
     /// Handle new YUV transaction with proof to check.
@@ -129,7 +134,7 @@ where
             };
         }
 
-        let tx = self.txs_storage.get_yuv_tx(txid).await.map_err(|e| {
+        let tx = self.txs_storage.get_yuv_tx(&txid).await.map_err(|e| {
             ErrorObject::owned(INTERNAL_ERROR_CODE, e.to_string(), Option::<Vec<u8>>::None)
         })?;
 
@@ -156,7 +161,7 @@ where
 
         let mut result = Vec::new();
 
-        for txid in txids {
+        for txid in &txids {
             let tx = self.txs_storage.get_yuv_tx(txid).await.map_err(|e| {
                 ErrorObject::owned(INTERNAL_ERROR_CODE, e.to_string(), Option::<Vec<u8>>::None)
             })?;
@@ -191,7 +196,7 @@ where
         let mut res = Vec::new();
 
         for txid in transactions {
-            match self.txs_storage.get_yuv_tx(txid).await {
+            match self.txs_storage.get_yuv_tx(&txid).await {
                 // if everything is ok, push transaction to result.
                 Ok(Some(tx)) => res.push(tx),
                 // if transaction not found, then it's not valid.
@@ -215,9 +220,16 @@ where
     }
 
     /// Send provided signed YUV transaction to Bitcoin network and validated it after it confirmed.
-    async fn send_raw_yuv_tx(&self, yuv_tx: YuvTransaction) -> RpcResult<bool> {
+    async fn send_raw_yuv_tx(
+        &self,
+        yuv_tx: YuvTransaction,
+        max_burn_amount_sat: Option<u64>,
+    ) -> RpcResult<bool> {
+        let max_burn_amount_btc: Option<f64> = max_burn_amount_sat
+            .map(|max_burn_amount_sat| Amount::from_sat(max_burn_amount_sat).to_btc());
+
         self.bitcoin_client
-            .send_raw_transaction(&yuv_tx.bitcoin_tx)
+            .send_raw_transaction_opts(&yuv_tx.bitcoin_tx, None, max_burn_amount_btc)
             .await
             .map_err(|err| {
                 tracing::error!("Failed to send transaction to Bitcoin network: {err}");
@@ -236,8 +248,8 @@ where
 
     async fn is_yuv_txout_frozen(&self, txid: Txid, vout: u32) -> RpcResult<bool> {
         let frozen_state = self
-            .frozen_txs_storage
-            .get_frozen_tx(OutPoint::new(txid, vout))
+            .announcement_storage
+            .get_frozen_tx(&OutPoint::new(txid, vout))
             .await
             .map_err(|e| {
                 tracing::error!("Failed to get frozen tx: {e}");
@@ -264,7 +276,7 @@ where
         yuv_tx: YuvTransaction,
     ) -> RpcResult<EmulateYuvTransactionResponse> {
         let emulator =
-            TransactionEmulator::new(self.txs_storage.clone(), self.frozen_txs_storage.clone());
+            TransactionEmulator::new(self.txs_storage.clone(), self.announcement_storage.clone());
 
         match emulator.emulate_yuv_transaction(&yuv_tx).await {
             // Transaction could be accepted by node.
@@ -284,6 +296,20 @@ where
                 reason: err.to_string(),
             }),
         }
+    }
+
+    async fn get_chroma_info(&self, chroma: Chroma) -> RpcResult<Option<ChromaInfo>> {
+        self.announcement_storage
+            .get_chroma_info(&chroma)
+            .await
+            .map_err(|e| {
+                tracing::error!("Failed to get chroma info: {e}");
+                ErrorObject::owned(
+                    INTERNAL_ERROR_CODE,
+                    "Storage is not available",
+                    Option::<Vec<u8>>::None,
+                )
+            })
     }
 }
 
@@ -363,7 +389,7 @@ where
         use EmulateYuvTransactionError as Error;
 
         for parent in parents {
-            let tx_entry = self.txs_storage.get_yuv_tx(parent.txid).await?;
+            let tx_entry = self.txs_storage.get_yuv_tx(&parent.txid).await?;
 
             // Return an error if parent transaction not found.
             let Some(tx) = tx_entry else {
@@ -393,7 +419,7 @@ where
     async fn is_parent_frozen(&self, parent: OutPoint) -> Result<(), EmulateYuvTransactionError> {
         let frozen_entry = self
             .frozen_txs_storage
-            .get_frozen_tx(OutPoint::new(parent.txid, parent.vout))
+            .get_frozen_tx(&OutPoint::new(parent.txid, parent.vout))
             .await?;
 
         let Some(frozen_entry) = frozen_entry else {
@@ -421,8 +447,8 @@ fn extract_parents(yuv_tx: &YuvTransaction) -> Option<Vec<OutPoint>> {
             ref input_proofs, ..
         } => collect_transfer_parents(yuv_tx, input_proofs).into(),
         // In case of freezes, parent transaction are one that are being frozen.
-        YuvTxType::FreezeToggle { .. } => {
-            tracing::warn!("Freeze toggle emulating is not implemented yet");
+        YuvTxType::Announcement(_) => {
+            tracing::warn!("Announcement emulating is not implemented yet");
             None
         }
     }

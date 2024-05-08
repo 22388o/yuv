@@ -8,10 +8,10 @@ use tokio_util::sync::CancellationToken;
 use tracing::trace;
 
 use yuv_p2p::client::handle::Handle as ClientHandle;
-use yuv_storage::{InventoryStorage, TransactionsStorage, TxStatesStorage};
+use yuv_storage::{InventoryStorage, TransactionsStorage, TxState, TxStatesStorage};
 use yuv_types::{
     messages::p2p::Inventory, ConfirmationIndexerMessage, ControllerMessage, ControllerP2PMessage,
-    TxCheckerMessage, TxState, YuvTransaction,
+    TxCheckerMessage, YuvTransaction,
 };
 
 /// Default inventory size.
@@ -106,7 +106,7 @@ where
             tokio::select! {
                 event_received = events.recv() => {
                     let Ok(event) = event_received else {
-                        tracing::trace!("All incoming event senders are dropped");
+                        trace!("All incoming event senders are dropped");
                         return;
                     };
 
@@ -120,7 +120,7 @@ where
                     }
                 }
                 _ = cancellation.cancelled() => {
-                    tracing::trace!("Cancellation received, stopping controller");
+                    trace!("Cancellation received, stopping controller");
                     return;
                 }
             }
@@ -271,7 +271,7 @@ where
 
         for payload_msg in payload {
             match payload_msg {
-                Inventory::Ytx(ytx_id) => {
+                Inventory::Ytx(ref ytx_id) => {
                     let yuv_tx = self
                         .txs_storage
                         .get_yuv_tx(ytx_id)
@@ -424,7 +424,7 @@ where
 
         let yuv_tx = self
             .txs_storage
-            .get_yuv_tx(*tx_id)
+            .get_yuv_tx(tx_id)
             .await
             .wrap_err("failed to get yuv tx")?;
 

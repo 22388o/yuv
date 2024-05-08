@@ -12,7 +12,7 @@ use bdk::{
     database::{MemoryDatabase, SqliteDatabase},
     descriptor,
     wallet::wallet_name_from_descriptor,
-    Balance, SignOptions,
+    Balance, LocalUtxo, SignOptions,
 };
 use bitcoin::{
     secp256k1::{self, All, Secp256k1},
@@ -26,13 +26,14 @@ use yuv_storage::{
     FlushStrategy, LevelDB, LevelDbOptions, PagesNumberStorage,
     TransactionsStorage as YuvTransactionsStorage,
 };
-use yuv_types::{FreezeTxToggle, YuvTransaction};
+use yuv_types::announcements::FreezeAnnouncement;
+use yuv_types::{Announcement, YuvTransaction};
 
 use crate::{
     bitcoin_provider::{BitcoinProvider, BitcoinProviderConfig, TxOutputStatus},
     database::wrapper::DatabaseWrapper,
     sync::{indexer::YuvTransactionsIndexer, storage::UnspentYuvOutPointsStorage},
-    txbuilder::{IssuanceTransactionBuilder, TransferTransactionBuilder},
+    txbuilder::{IssuanceTransactionBuilder, SweepTransactionBuilder, TransferTransactionBuilder},
     types::FeeRateStrategy,
     AnyBitcoinProvider,
 };
@@ -391,6 +392,7 @@ where
                 }
                 #[cfg(feature = "bulletproof")]
                 PixelProof::Bulletproof(..) => filtered.push((OutPoint::new(txid, vout), proof)),
+                PixelProof::EmptyPixel(..) => filtered.push((OutPoint::new(txid, vout), proof)),
                 // NOTE: We skip these types of outputs as they are not spendable without
                 // additional information.
                 //
@@ -404,13 +406,17 @@ where
 
     /// Calculate current balances by iterating through transactions from
     /// intenal storage.
-    pub fn balances(&self) -> HashMap<Chroma, u64> {
+    pub fn balances(&self) -> HashMap<Chroma, u128> {
         let mut balances = HashMap::new();
 
         let utxos = self.utxos.read().unwrap();
         for proof in utxos.values() {
+            if proof.is_empty_pixelproof() {
+                continue;
+            }
+
             let pixel = proof.pixel();
-            let balance = balances.entry(pixel.chroma).or_insert(0u64);
+            let balance = balances.entry(pixel.chroma).or_insert(0u128);
 
             *balance += pixel.luma.amount;
         }
@@ -418,13 +424,19 @@ where
         balances
     }
 
-    pub fn satoshis(&self) -> eyre::Result<Balance> {
+    /// Get Bitcoin balances.
+    pub fn bitcoin_balances(&self) -> eyre::Result<Balance> {
         Ok(self.bitcoin_wallet.read().unwrap().get_balance()?)
     }
 
+    /// Get all unspent Bitcoin outputs.
+    pub fn bitcoin_utxos(&self) -> eyre::Result<Vec<LocalUtxo>> {
+        Ok(self.bitcoin_wallet.read().unwrap().list_unspent()?)
+    }
+
     /// Get all unspent YUV transactions outputs with given [`Chroma`].
-    pub fn utxos_by_chroma(&self, chroma: Chroma) -> Vec<(OutPoint, u64)> {
-        let utxos = self.utxos.read().unwrap();
+    pub fn utxos_by_chroma(&self, chroma: Chroma) -> Vec<(OutPoint, u128)> {
+        let utxos = self.yuv_utxos();
         utxos
             .iter()
             .filter(|(_, proof)| proof.pixel().chroma == chroma)
@@ -432,10 +444,33 @@ where
             .collect()
     }
 
-    pub fn utxos(&self) -> HashMap<OutPoint, PixelProof> {
-        let utxos = &self.utxos.read().unwrap();
+    /// Get unspent YUV transactions with the given filter.
+    fn utxos<P>(&self, filter: P) -> HashMap<OutPoint, PixelProof>
+    where
+        P: Fn(&(&OutPoint, &PixelProof)) -> bool,
+    {
+        let utxos = &self
+            .utxos
+            .read()
+            .unwrap()
+            .iter()
+            .filter(|utxo| filter(utxo))
+            .map(|(outpoint, proof)| (*outpoint, proof.clone()))
+            .collect::<HashMap<OutPoint, PixelProof>>();
 
         (*utxos).clone()
+    }
+
+    /// Get all unspent YUV transactions outputs.
+    pub fn yuv_utxos(&self) -> HashMap<OutPoint, PixelProof> {
+        self.utxos(|utxo| !utxo.1.is_empty_pixelproof())
+    }
+
+    /// Get unspent tweaked Bitcoin outputs.
+    ///
+    /// Note: all the tweaked unspent outputs are tweaked by the same zero chroma.
+    pub fn tweaked_satoshi_utxos(&self) -> HashMap<OutPoint, PixelProof> {
+        self.utxos(|utxo| utxo.1.is_empty_pixelproof())
     }
 
     /// Return [`YuvTxType::Transfer`] transaction builder for creating
@@ -452,6 +487,12 @@ where
     /// [`YuvTxType::Issue`]: yuv_types::YuvTxType::Issue
     pub fn build_issuance(&self) -> eyre::Result<IssuanceTransactionBuilder<YTDB, BTDB>> {
         IssuanceTransactionBuilder::try_from(self)
+    }
+
+    /// Return a sweep transaction builder for creating
+    /// a sweep transaction by YUV protocol.
+    pub fn build_sweep(&self) -> eyre::Result<SweepTransactionBuilder<YTDB, BTDB>> {
+        SweepTransactionBuilder::try_from(self)
     }
 
     /// Create funding lightning transaction from:
@@ -530,16 +571,14 @@ where
         Ok(yuv_tx)
     }
 
-    /// Create YUV freeze transaction for given `outpoint`.
-    pub fn create_freeze(
+    /// Create YUV [`Announcement`] transaction for given [`Announcement`].
+    pub fn create_announcement_tx(
         &self,
-        outpoint: OutPoint,
+        announcement: Announcement,
         fee_rate_strategy: FeeRateStrategy,
         blockchain: &impl Blockchain,
         satoshis: u64,
     ) -> eyre::Result<YuvTransaction> {
-        let tx_toggle = FreezeTxToggle::from(outpoint);
-
         let tx = {
             let wallet = self.bitcoin_wallet.read().unwrap();
             let mut builder = wallet.build_tx();
@@ -549,7 +588,7 @@ where
                 .wrap_err("failed to estimate fee")?;
 
             builder
-                .add_recipient(tx_toggle.to_script(), satoshis)
+                .add_recipient(announcement.to_script(), satoshis)
                 .fee_rate(fee_rate);
 
             let (mut psbt, _) = builder.finish()?;
@@ -559,7 +598,23 @@ where
             psbt.extract_tx()
         };
 
-        Ok(YuvTransaction::freeze_toggles(vec![tx_toggle], tx))
+        Ok(YuvTransaction::new(tx, announcement.into()))
+    }
+
+    /// Create YUV freeze transaction for given [`OutPoint`].
+    pub fn create_freeze(
+        &self,
+        outpoint: OutPoint,
+        fee_rate_strategy: FeeRateStrategy,
+        blockchain: &impl Blockchain,
+        satoshis: u64,
+    ) -> eyre::Result<YuvTransaction> {
+        let tx_freeze = FreezeAnnouncement::from(outpoint);
+
+        let yuv_tx =
+            self.create_announcement_tx(tx_freeze.into(), fee_rate_strategy, blockchain, satoshis)?;
+
+        Ok(yuv_tx)
     }
 }
 

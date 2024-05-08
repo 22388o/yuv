@@ -25,7 +25,7 @@ use yuv_types::{YuvTransaction, YuvTxType};
 use super::e2e::NETWORK;
 
 /// Minimum transfer amount.
-const TRANSFER_LOWER_BOUND: u64 = 1000;
+const TRANSFER_LOWER_BOUND: u128 = 1000;
 const TRANFERS_PER_ISSUANCE: u32 = 6;
 
 /// Amount of tokens to issue.
@@ -34,7 +34,7 @@ const TRANFERS_PER_ISSUANCE: u32 = 6;
 /// that can be performed from a single issuance.
 /// This makes sense as at each iteration it is checked if the balance is higher than `TRANSFER_LOWER_BOUND`.
 /// If it is, then half the balance is sent. Otherwise - the whole balance is sent.
-const ISSUE_AMOUNT: u64 = TRANSFER_LOWER_BOUND * 2u64.pow(TRANFERS_PER_ISSUANCE);
+const ISSUE_AMOUNT: u128 = TRANSFER_LOWER_BOUND * 2u128.pow(TRANFERS_PER_ISSUANCE);
 
 /// Amount of satoshis to put into each YUV output.
 const SATOSHIS_AMOUNT: u64 = 1000;
@@ -77,7 +77,7 @@ impl Account {
         mut self,
         recipients: Arc<[PrivateKey]>,
         tx_sender: UnboundedSender<YuvTransaction>,
-        balance_sender: UnboundedSender<(PrivateKey, HashMap<Chroma, u64>)>,
+        balance_sender: UnboundedSender<(PrivateKey, HashMap<Chroma, u128>)>,
         cancellation_token: CancellationToken,
     ) -> eyre::Result<()> {
         info!("Started sending transactions");
@@ -95,7 +95,7 @@ impl Account {
                     self.send_balances(balance_sender).await?;
                     return Ok(());
                 }
-            };
+            }
 
             // Sync the wallet.
             self.wallet.sync(SyncOptions::default()).await?;
@@ -113,7 +113,8 @@ impl Account {
 
             let txid = tx.bitcoin_tx.txid();
             // Send the transaction.
-            if self.yuv_client.send_raw_yuv_tx(tx.clone()).await.is_ok() {
+            let response = self.yuv_client.send_raw_yuv_tx(tx.clone(), None).await;
+            if response.is_ok() {
                 let tx_type = tx_type(&tx.tx_type);
                 info!("{} tx sent | Txid: {}", tx_type, txid);
 
@@ -208,7 +209,7 @@ impl Account {
     /// `send_balances` sends the actual balances of the address to the `tx-checker` after the cancellation received.
     async fn send_balances(
         &mut self,
-        balance_sender: UnboundedSender<(PrivateKey, HashMap<Chroma, u64>)>,
+        balance_sender: UnboundedSender<(PrivateKey, HashMap<Chroma, u128>)>,
     ) -> eyre::Result<()> {
         self.wallet.sync(SyncOptions::yuv_only()).await?;
 
@@ -249,8 +250,8 @@ impl Account {
 /// String representation of the YUV transaction type.
 pub(crate) fn tx_type(tx_type: &YuvTxType) -> String {
     match tx_type {
-        yuv_types::YuvTxType::Issue { .. } => "Issuance".into(),
-        yuv_types::YuvTxType::Transfer { .. } => "Transfer".into(),
-        yuv_types::YuvTxType::FreezeToggle { .. } => "Freeze".into(),
+        YuvTxType::Issue { .. } => "Issuance".into(),
+        YuvTxType::Transfer { .. } => "Transfer".into(),
+        YuvTxType::Announcement(_) => "Announcement".into(),
     }
 }

@@ -15,11 +15,10 @@ pub struct IssueArgs {
 
     /// Value to issue
     #[clap(long)]
-    pub value: u64,
+    pub value: u128,
 
     /// Public key of the recipient.
-    #[clap(long)]
-    #[arg(value_parser = Chroma::from_address)]
+    #[clap(long, value_parser = Chroma::from_address)]
     pub recipient: Chroma,
 }
 
@@ -65,7 +64,7 @@ pub async fn run(
 
     println!("{}", tx.bitcoin_tx.txid());
 
-    yuv_client.send_raw_yuv_tx(tx).await?;
+    yuv_client.send_raw_yuv_tx(tx, None).await?;
 
     Ok(())
 }

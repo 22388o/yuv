@@ -150,7 +150,7 @@ macro_rules! assert_wallet_has_utxo {
         let __wallet = &$wallet;
         let __outpoint = bitcoin::OutPoint::new($txid, $vout);
 
-        let __utxos = __wallet.utxos();
+        let __utxos = __wallet.yuv_utxos();
 
         let __utxo = __utxos.get(&__outpoint);
 

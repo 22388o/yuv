@@ -8,7 +8,7 @@ use yuv_pixels::{Pixel, PixelHash};
 pub struct GeneratePixelHashArgs {
     /// Amount of tokens to send.
     #[clap(long)]
-    pub amount: u64,
+    pub amount: u128,
     /// Chroma of the pixel.
     #[clap(long)]
     pub chroma: PublicKey,

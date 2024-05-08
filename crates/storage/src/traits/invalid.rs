@@ -7,17 +7,19 @@ use yuv_types::YuvTransaction;
 
 use crate::{KeyValueResult, KeyValueStorage};
 
-const INVALID_TXS_PREFIX_SIZE: usize = 4;
-const INVALID_TXS_PREFIX: &[u8; INVALID_TXS_PREFIX_SIZE] = b"inv-";
+const KEY_PREFIX: &str = "inv-";
+const KEY_PREFIX_SIZE: usize = KEY_PREFIX.len();
 
-/// Invalid transactions key size is 4(`INVALID_TXS_PREFIX:[u8; 4]`) + 32(`txid:Txid`) = 36 bytes long
-const INVALID_TXS_KEY_SIZE: usize = INVALID_TXS_PREFIX_SIZE + size_of::<Txid>();
+/// Invalid transactions key size is:
+///
+/// 4 bytes (`INVALID_TXS_PREFIX`) + 32 bytes (`txid`) = 36 bytes long
+const INVALID_TXS_KEY_SIZE: usize = KEY_PREFIX_SIZE + size_of::<Txid>();
 
 fn invalid_txs_storage_key(txid: Txid) -> ByteArray<INVALID_TXS_KEY_SIZE> {
     let mut bytes = [0u8; INVALID_TXS_KEY_SIZE];
 
-    bytes[..INVALID_TXS_PREFIX_SIZE].copy_from_slice(INVALID_TXS_PREFIX);
-    bytes[INVALID_TXS_PREFIX_SIZE..].copy_from_slice(&txid);
+    bytes[..KEY_PREFIX_SIZE].copy_from_slice(KEY_PREFIX.as_bytes());
+    bytes[KEY_PREFIX_SIZE..].copy_from_slice(&txid);
 
     ByteArray::new(bytes)
 }

@@ -1,7 +1,7 @@
 //! This module provides intergration tests for creating multisig YUV transactions.
 
 use bdk::{bitcoincore_rpc::RpcApi, miniscript::ToPublicKey};
-use bitcoin::{secp256k1::Secp256k1, OutPoint, PrivateKey, Script};
+use bitcoin::{secp256k1::Secp256k1, OutPoint, PrivateKey};
 use bitcoin_client::RawTx;
 use once_cell::sync::Lazy;
 use ydk::{types::FeeRateStrategy, wallet::SyncOptions};
@@ -56,16 +56,13 @@ async fn test_create_musig_transaction() -> eyre::Result<()> {
     let bobs_pubkey = BOB_PRIVATE_KEY.public_key(&secp);
     let alice_pubkey = ALICE_PRIVATE_KEY.public_key(&secp);
 
-    const ISSUANCE_AMOUNT: u64 = 1000;
+    const ISSUANCE_AMOUNT: u128 = 1000;
 
     let fee_rate_strategy = FeeRateStrategy::Manual { fee_rate: 2.0 };
 
     // Create issuance with one multisig output to BOB and ALICE
     let issuance = {
         let mut builder = issuer.build_issuance()?;
-
-        let alice_script_pubkey =
-            Script::new_v0_p2wpkh(&alice.public_key().wpubkey_hash().unwrap());
 
         builder
             // Multisig with 2-of-2
@@ -76,7 +73,7 @@ async fn test_create_musig_transaction() -> eyre::Result<()> {
                 1000,
             )
             // Fund Alice with bitcoins too
-            .add_sats_recipient(alice_script_pubkey, 10000)
+            .add_sats_recipient(&alice_pubkey.inner, 10000)
             .set_fee_rate_strategy(fee_rate_strategy);
 
         builder.finish(&blockchain).await?
@@ -91,7 +88,7 @@ async fn test_create_musig_transaction() -> eyre::Result<()> {
 
     let txid = issuance.bitcoin_tx.txid();
 
-    yuv_client.send_raw_yuv_tx(issuance).await?;
+    yuv_client.send_raw_yuv_tx(issuance, None).await?;
 
     // Add block with issuance to the chain
     blockchain_rpc.generate_to_address(7, &issuer.address()?)?;
@@ -102,7 +99,7 @@ async fn test_create_musig_transaction() -> eyre::Result<()> {
 
     alice.sync(SyncOptions::default()).await?;
 
-    const TRANSFER_AMOUNT: u64 = 100;
+    const TRANSFER_AMOUNT: u128 = 100;
 
     // Create transfer that spends issuance and sends 100 tokens to Carol
     let transfer = {
@@ -130,7 +127,7 @@ async fn test_create_musig_transaction() -> eyre::Result<()> {
 
     let txid = transfer.bitcoin_tx.txid();
 
-    yuv_client.send_raw_yuv_tx(transfer).await?;
+    yuv_client.send_raw_yuv_tx(transfer, None).await?;
 
     // Add block with transfer to the chain and sign it
     blockchain_rpc.generate_to_address(1, &alice.address()?)?;

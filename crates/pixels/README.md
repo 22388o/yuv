@@ -23,6 +23,8 @@ subset for the last one. They are:
 * [`LightningCommitmentProof`] - input/ouput proof for Lightning commitment transaction [`to_local` output].
 * [`LightningHtlcProof`] - input/output proof for Lightning commitment transaction [`htlc` output].
 
+> In future, arbitary scripts that have public key in it will be supported.
+
 ## Example
 
 Suppose Alice wants to send 5 YUV coins to Bob. For that, she needs to create a

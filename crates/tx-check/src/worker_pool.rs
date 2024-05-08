@@ -4,21 +4,16 @@ use crate::worker::Config;
 use bitcoin_client::{BitcoinRpcApi, Error as BitcoinRpcError};
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
-use yuv_storage::{FrozenTxsStorage, InvalidTxsStorage, TransactionsStorage};
+use yuv_storage::{ChromaInfoStorage, FrozenTxsStorage, InvalidTxsStorage, TransactionsStorage};
 
-pub struct TxCheckerWorkerPool<TS, SS, BC>
-where
-    TS: TransactionsStorage + Clone + Send + Sync + 'static,
-    SS: InvalidTxsStorage + FrozenTxsStorage + Clone + Send + Sync + 'static,
-    BC: BitcoinRpcApi + Send + Sync + 'static,
-{
-    workers: Vec<TxCheckerWorker<TS, SS, BC>>,
+pub struct TxCheckerWorkerPool<TransactoinsStorage, StateStorage, BitcoinClient> {
+    workers: Vec<TxCheckerWorker<TransactoinsStorage, StateStorage, BitcoinClient>>,
 }
 
 impl<TS, SS, BC> TxCheckerWorkerPool<TS, SS, BC>
 where
     TS: TransactionsStorage + Clone + Send + Sync + 'static,
-    SS: InvalidTxsStorage + FrozenTxsStorage + Clone + Send + Sync + 'static,
+    SS: InvalidTxsStorage + FrozenTxsStorage + ChromaInfoStorage + Clone + Send + Sync + 'static,
     BC: BitcoinRpcApi + Send + Sync + 'static,
 {
     pub fn from_config(

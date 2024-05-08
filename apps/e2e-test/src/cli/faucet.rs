@@ -1,6 +1,6 @@
 use std::{cmp, sync::Arc, time::Duration};
 
-use bitcoin::Script;
+use bitcoin::PublicKey;
 
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info};
@@ -31,7 +31,7 @@ impl Faucet {
     }
 
     /// Fund the addresses with satoshis.
-    pub async fn fund_accounts(&self, addresses: Arc<Vec<Script>>) -> eyre::Result<()> {
+    pub async fn fund_accounts(&self, recipients: Arc<Vec<PublicKey>>) -> eyre::Result<()> {
         info!("Funding the accounts with satoshis, the process can take a while");
 
         // Sync to fetch the Bitcoin UTXOs.
@@ -39,14 +39,14 @@ impl Faucet {
             .wallet()
             .sync(SyncOptions::bitcoin_only())
             .await?;
-        let mut balance = self.funder.wallet().satoshis()?.confirmed;
+        let mut balance = self.funder.wallet().bitcoin_balances()?.confirmed;
 
         // If the balance is insufficient, generate some blocks and sync again.
         while balance < FUNDING_LOWER_BOUND {
             // Generate at least 101 blocks.
             self.rpc_blockchain.generate_to_address(
                 cmp::max(
-                    (addresses.len() * BLOCKS_PER_ACCOUNT).try_into().unwrap(),
+                    (recipients.len() * BLOCKS_PER_ACCOUNT).try_into().unwrap(),
                     COINBASE_MATURITY,
                 ),
                 &self.funder.p2wpkh_address()?,
@@ -56,11 +56,11 @@ impl Faucet {
                 .wallet()
                 .sync(SyncOptions::bitcoin_only())
                 .await?;
-            balance = self.funder.wallet().satoshis()?.confirmed;
+            balance = self.funder.wallet().bitcoin_balances()?.confirmed;
         }
 
         // Calculate the amount to fund each address with.
-        let funding_amount = cmp::min(FUNDING_LOWER_BOUND, balance) / (addresses.len() + 1) as u64;
+        let funding_amount = cmp::min(FUNDING_LOWER_BOUND, balance) / (recipients.len() + 1) as u64;
 
         info!(
             r#"
@@ -74,15 +74,15 @@ impl Faucet {
             let mut builder = self.funder.wallet().build_transfer()?;
 
             // Add each address as a recipient to the tx.
-            for address in addresses.iter() {
-                builder.add_sats_recipient(address.clone(), funding_amount);
+            for recipient in recipients.iter() {
+                builder.add_sats_recipient(&recipient.inner, funding_amount);
             }
 
             builder.set_fee_rate_strategy(FEE_RATE_STARTEGY);
             builder.finish(&self.rpc_blockchain).await?
         };
 
-        self.funder.yuv_client().send_raw_yuv_tx(tx).await?;
+        self.funder.yuv_client().send_raw_yuv_tx(tx, None).await?;
         self.rpc_blockchain
             .generate_to_address(6, &self.funder.p2wpkh_address()?)?;
 
@@ -95,7 +95,7 @@ impl Faucet {
     pub async fn run(
         self,
         interval: Duration,
-        addresses: Arc<Vec<Script>>,
+        recipients: Arc<Vec<PublicKey>>,
         cancellation_token: CancellationToken,
     ) -> eyre::Result<()> {
         // Sleeping after the initial funding.
@@ -112,7 +112,7 @@ impl Faucet {
                 _ = timer.tick() => {},
             };
 
-            if let Err(err) = self.fund_accounts(Arc::clone(&addresses)).await {
+            if let Err(err) = self.fund_accounts(Arc::clone(&recipients)).await {
                 error!("Funding iteration failed: {}", err);
             } else {
                 info!("Funding iteration succeeded");

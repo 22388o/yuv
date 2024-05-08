@@ -5,12 +5,12 @@ CLI tool for managing YUV transactions.
 ## Features
 
 - Create a YUV transaction (`transfer`, `issue`, `freeze`):
-  - Issue an asset from your pair of keys;
-  - Transfer issued tokens;
-  - Freeze, unfreeze YUV outputs;
+    - Issue an asset from your pair of keys;
+    - Transfer issued tokens;
+    - Freeze, unfreeze YUV outputs;
 - Communicate with a YUV node (`node` subcommand):
-  - Provide pixel proofs to the YUV node;
-  - Get YUV transactions from the YUV node;
+    - Provide pixel proofs to the YUV node;
+    - Get YUV transactions from the YUV node;
 - Validate proofs locally (`validate` subcommand);
 - Generate YUV addresses, key-pairs, pixel hashes (`generate` subcommand);
 - Convert instances between each other (`convert` subcommand).
@@ -20,7 +20,7 @@ CLI tool for managing YUV transactions.
 Clone git repository:
 
 ```sh
-git clone https://github.com/akitamiabtc/yuv.git
+git clone git@github.com:akitamiabtc/yuv.git
 ```
 
 Install using cargo:
@@ -38,7 +38,7 @@ Setup configuration file:
 
 ```toml
 # config.toml
-private_key = "your_private_key"
+private_key = "cMzCipjMyeNdnPmG6FzB1GAL7ziTBPQ2TJ4EPWZWPdeGgbLTCAEE"
 
 storage = "path/to/storage"
 
@@ -53,7 +53,7 @@ start_time = 0
 # Or if you want to use Esplora:
 # [bitcoint-provider]
 # type = "esplora"
-# url = "http://127.0.0.1:30000"
+# url = "http://127.0.0.1:3000"
 # network = "regtest"
 # # stop gap - It is a setting that determines when to stop fetching transactions for a set of
 # # addresses by indicating a gap of unused addresses. For example, if set to 20, the syncing
@@ -87,15 +87,16 @@ Let's go through some of the scenarios:
 3. Generate two key pairs of keys that will transfer YUV-coins between each other
    (let's name them **Alice** and **Bob**, see [step 3]);
 4. Issue **USD** and **EUR** tokens to **Alice** (see [step 4]);
-   - Check **Alice**'s balances and UTXO.
+    - Check **Alice**'s balances and UTXO.
 5. Transfer issued tokens from **Alice** to **Bob** (see [step 5]);
-   - Perform a monochromatic transfer.
-   - Perform a multichromatic transfer.
+    - Perform a monochromatic transfer.
+    - Perform a multichromatic transfer.
 6. Using **USD Issuer**'s keys create a freeze transaction for **Bob**'s output
    (see [step 6]);
 7. Using **USD Issuer**'s keys create an unfreeze transaction for **Bob**'s output (see [step 7]);
 
-> We will use [Nigiri] for this demo to setup configured Regtest Bitcoin node and fund our freshly created users with Bitcoins.
+> We will use [Nigiri] for this demo to setup configured Regtest Bitcoin node and fund our freshly
+> created users with Bitcoins.
 
 [Nigiri]: https://nigiri.vulpem.com/
 
@@ -103,7 +104,8 @@ Let's go through some of the scenarios:
 > helpful daemons like explorer and webapp.
 
 #### 1. Synchronize the wallet history
-Use the following command to synchronize your wallet: 
+
+Use the following command to synchronize your wallet:
 
 > NOTE: replace the `config.toml` with a path to your configuration file.
 
@@ -112,7 +114,8 @@ yuv-cli --config ./config.toml wallet sync
 ```
 
 It could take some time, so be calm and make a cup of coffee for yourself. Also you can change
-`start_time` field in the `[bitcoin_provider]` section to cut down on synchronizing time. If you want to
+`start_time` field in the `[bitcoin_provider]` section to cut down on synchronizing time. If you
+want to
 interrupt the syncing process, use the following command:
 
 ``` sh
@@ -302,22 +305,32 @@ from environment variable added in [step 2]).
 RESULT:
 
 ```text
-tx id: 2a92796ba4d385caf7fbc392d2793fb3ffd3cf53bcb17c884fa1840100eb29f5
+tx id: 4f98d522ad33152af8392fc13f191ae966c5503e2ced2aad116c41890641b807
 type: Issue
 data:
   output_proofs:
     0:
-      pixel:
-        luma:
-          amount: 10000
-        chroma: ab28d32fe218d3cb53d330e2dd21db5b32dafb9fc5296c42d17dcb1cd63beab2
-      inner_key: 02bdd2c029e4836fabace9bac3ec9cc9ced9d547e3f3e3b59073e33c9b3508e919
+      type: Sig
+      data:
+        pixel:
+          luma:
+            amount: 10000
+          chroma: ab28d32fe218d3cb53d330e2dd21db5b32dafb9fc5296c42d17dcb1cd63beab2
+        inner_key: 02bdd2c029e4836fabace9bac3ec9cc9ced9d547e3f3e3b59073e33c9b3508e919
+    1:
+      type: EmptyPixel
+      data:
+        inner_key: 03ab28d32fe218d3cb53d330e2dd21db5b32dafb9fc5296c42d17dcb1cd63beab2
 ```
 
 As the result, you will get the transaction ID and structure of the issuance
 proof of the YUV transaction. By parameters obtained from configuration file,
 `yuv-cli` will send it for broadcasting to YUV node with created proofs, where
 the node will wait until the tranasction is mined to check it before accepting.
+
+> There is an empty pixel. It doesn't hold any Pixel data, it is
+> just empty proof indicating that this Bitcoin output holds only satoshis
+> and zero YUV tokens.
 
 Using `nigiri` let's mine the next block:
 
@@ -328,7 +341,7 @@ nigiri rpc --generate 1
 Check that the transaction has been accepted by the node:
 
 ```sh
-yuv-cli --config ./usd.toml get --txid 2a92796ba4d385caf7fbc392d2793fb3ffd3cf53bcb17c884fa1840100eb29f5
+yuv-cli --config ./usd.toml get --txid 4f98d522ad33152af8392fc13f191ae966c5503e2ced2aad116c41890641b807
 ```
 
 As a sign of acceptance, you would receive a YUV transaction in JSON format.
@@ -342,7 +355,7 @@ yuv-cli --config ./alice.toml balances
 RESULT:
 
 ```text
-ab28d32fe218d3cb53d330e2dd21db5b32dafb9fc5296c42d17dcb1cd63beab2: 10000
+bcrt1p4v5dxtlzrrfuk57nxr3d6gwmtved47ulc55kcsk30h93e43ma2eqvrek30: 10000
 ```
 
 Let's do the same with **EUR Issuer**:
@@ -361,8 +374,8 @@ yuv-cli --config ./alice.toml balances
 RESULT:
 
 ```text
-bc1p4v5dxtlzrrfuk57nxr3d6gwmtved47ulc55kcsk30h93e43ma2eqkj9l76: 10000
-bc1phynjv46lc4vsgdyu8qzna4rkx0m6d2s48cjmx8mtcqkey5r23t2s5rt9mx: 10000
+bcrt1p4v5dxtlzrrfuk57nxr3d6gwmtved47ulc55kcsk30h93e43ma2eqvrek30: 10000
+bcrt1phynjv46lc4vsgdyu8qzna4rkx0m6d2s48cjmx8mtcqkey5r23t2swjhv5n: 10000
 ```
 
 #### 5. Transfer from **Alice** to **Bob**
@@ -373,7 +386,7 @@ Now, let's move on to the transfer. Fund **Alice** with one Bitcoin:
 nigiri faucet bcrt1qm5wu5zjyswyw877kq8dup6k02nef29wwc2tcwu 1
 ```
 
-We are ready for transfer of 1000 **USD** tokens from **Alice** to **Bob**:
+We are ready to transfer 1000 **USD** tokens from **Alice** to **Bob**:
 
 ```sh
 yuv-cli --config ./alice.toml transfer \
@@ -385,7 +398,7 @@ yuv-cli --config ./alice.toml transfer \
 RESULT:
 
 ```text
-tx id: 477df4cb007a46fe9efd7de75ffa7012846d9babea3f31bbb50c9b93f12ff7f5
+tx id: a5bfd730c26e6b08ee9a0a02f1140e5527d1d47d45fc78fecbc661c5bc9383d5
 type: Transfer
 data:
   input_proofs:
@@ -414,6 +427,10 @@ data:
             amount: 9000
           chroma: ab28d32fe218d3cb53d330e2dd21db5b32dafb9fc5296c42d17dcb1cd63beab2
         inner_key: 02bdd2c029e4836fabace9bac3ec9cc9ced9d547e3f3e3b59073e33c9b3508e919
+    2:
+      type: EmptyPixel
+      data:
+        inner_key: 02bdd2c029e4836fabace9bac3ec9cc9ced9d547e3f3e3b59073e33c9b3508e919
 ```
 
 Generate block using `nigiri`:
@@ -431,8 +448,8 @@ yuv-cli --config ./alice.toml balances
 RESULT:
 
 ```text
-bc1p4v5dxtlzrrfuk57nxr3d6gwmtved47ulc55kcsk30h93e43ma2eqkj9l76: 9000
-bc1phynjv46lc4vsgdyu8qzna4rkx0m6d2s48cjmx8mtcqkey5r23t2s5rt9mx: 10000
+bcrt1phynjv46lc4vsgdyu8qzna4rkx0m6d2s48cjmx8mtcqkey5r23t2swjhv5n: 10000
+bcrt1p4v5dxtlzrrfuk57nxr3d6gwmtved47ulc55kcsk30h93e43ma2eqvrek30: 9000
 ```
 
 ```sh
@@ -442,13 +459,48 @@ yuv-cli --config ./bob.toml balances
 RESULT:
 
 ```text
-bc1p4v5dxtlzrrfuk57nxr3d6gwmtved47ulc55kcsk30h93e43ma2eqkj9l76: 1000
+bcrt1p4v5dxtlzrrfuk57nxr3d6gwmtved47ulc55kcsk30h93e43ma2eqvrek30: 1000
+```
+
+##### Tweaked Bitcoin UTXOs and Sweep
+
+You have already seen that YUV puts empty pixel proofs to the outputs that don't hold any YUV
+tokens.
+These outputs are actually tweaked just like the outputs that hold actual Pixel data, but they are
+tweaked
+with empty pixels, i.e. with zero Luma and Chroma.
+
+To spend these tweaked UTXOs, you need to create a **sweep** transaction. This means to create a
+transaction which spends
+all YUV outputs tweaked by zero pixels to a **P2WPKH address**.
+
+This can be easily done with `yuv-cli`.
+In the above example, Alice's transfer transaction contained a change output that was tweaked with
+an empty pixel.
+To sweep it and all the other tweaked outputs (if any), Alice simply needs to execute:
+
+```sh
+yuv-cli --config ./alice.toml sweep
+```
+
+RESULT:
+
+```text
+tx id: f552b5b5146b390c5c73e4a4f22920a5fff14e56dffe17ca7f8b3235324f6c06
+```
+
+If there are no tweaked Bitcoin outputs with empty Pixel proofs, the following message will be
+displayed:
+
+```text
+Address has no tweaked Bitcoin UTXOs
 ```
 
 ##### Multichromatic transfers
 
 We covered monochromatic transfers above (i.e. each transfer contained a single chroma).
-Now, let's try to perform a multichromatic transfer and send both **EUR** and **USD** from **Alice** to **Bob** in a single transfer.
+Now, let's try to perform a multichromatic transfer and send both **EUR** and **USD** from **Alice**
+to **Bob** in a single transfer.
 
 As Alice's balance is already filled with some **EUR** and **USD**, we are ready to make a transfer:
 
@@ -465,7 +517,7 @@ yuv-cli --config ./alice.toml transfer \
 RESULT:
 
 ```text
-tx id: 6936880d51e5fd92b6dd3c754905b538f146f69942080c4f3dca8b99d5f1f086
+tx id: 036d18a4c8ceb75c08a3abcabb40f8a239bbebd19751c365c610569581cda7db
 type: Transfer
 data:
   input_proofs:
@@ -518,6 +570,10 @@ data:
             amount: 9000
           chroma: b92726575fc55904349c38053ed47633f7a6aa153e25b31f6bc02d92506a8ad5
         inner_key: 02bdd2c029e4836fabace9bac3ec9cc9ced9d547e3f3e3b59073e33c9b3508e919
+    4:
+      type: EmptyPixel
+      data:
+        inner_key: 02bdd2c029e4836fabace9bac3ec9cc9ced9d547e3f3e3b59073e33c9b3508e919
 ```
 
 Generate a block using `nigiri`:
@@ -535,8 +591,8 @@ yuv-cli --config ./alice.toml balances
 RESULT:
 
 ```text
-bc1p4v5dxtlzrrfuk57nxr3d6gwmtved47ulc55kcsk30h93e43ma2eqkj9l76: 8500
-bc1phynjv46lc4vsgdyu8qzna4rkx0m6d2s48cjmx8mtcqkey5r23t2s5rt9mx: 9000
+bcrt1p4v5dxtlzrrfuk57nxr3d6gwmtved47ulc55kcsk30h93e43ma2eqvrek30: 8500
+bcrt1phynjv46lc4vsgdyu8qzna4rkx0m6d2s48cjmx8mtcqkey5r23t2swjhv5n: 9000
 ```
 
 ```sh
@@ -546,8 +602,8 @@ yuv-cli --config ./bob.toml balances
 RESULT:
 
 ```text
-bc1p4v5dxtlzrrfuk57nxr3d6gwmtved47ulc55kcsk30h93e43ma2eqkj9l76: 1500
-bc1phynjv46lc4vsgdyu8qzna4rkx0m6d2s48cjmx8mtcqkey5r23t2s5rt9mx: 1000
+bcrt1phynjv46lc4vsgdyu8qzna4rkx0m6d2s48cjmx8mtcqkey5r23t2swjhv5n: 1000
+bcrt1p4v5dxtlzrrfuk57nxr3d6gwmtved47ulc55kcsk30h93e43ma2eqvrek30: 1500
 ```
 
 **NOTE:** it's also acceptable to specify different recipients in a multichromatic transfer.
@@ -568,20 +624,6 @@ RESULT:
 ```
 
 Using **USD Issuer**'s keys create a freeze transaction for **Bob**'s output:
-
-In case of using `esplora` as a `bitcoin_provider` you should pass `--rpc-url` and `--rpc-auth` where
-format of `--rpc-auth` is `[login:paasword]`. 
-If your node doesn't require auth credentials, just use `--rpc-url`. The example below: 
-
-``` sh
-# In case when the Bitcoin RPC node requires auth credentials.
-yuv-cli --config ./usd.toml freeze 477df4cb007a46fe9efd7de75ffa7012846d9babea3f31bbb50c9b93f12ff7f5 0 --rpc-url http://127.0.0.1:18443 --rpc-auth admin1:123
-
-# In case when the Bitcoin RPC node doesn't require auth credentials.
-yuv-cli --config ./usd.toml freeze 477df4cb007a46fe9efd7de75ffa7012846d9babea3f31bbb50c9b93f12ff7f5 0 --rpc-url http://127.0.0.1:18443
-```
-
-When you use `bitcoin_rpc` as a `bitcoin_provider` the following command will freeze the tokens:
 
 ```sh
 yuv-cli --config ./usd.toml freeze 477df4cb007a46fe9efd7de75ffa7012846d9babea3f31bbb50c9b93f12ff7f5 0
@@ -620,14 +662,8 @@ Now **Bob** has one less UTXO:
 #### 7. Create unfreeze transaction for **Bob**'s output
 
 Using **Issuer**'s keys create an unfreeze transaction for **Bob**'s output:
-``` sh
-# (Esplora) In case when the Bitcoin RPC node requires auth credentials.
-yuv-cli --config ./usd.toml unfreeze 477df4cb007a46fe9efd7de75ffa7012846d9babea3f31bbb50c9b93f12ff7f5 0 --rpc-url http://127.0.0.1:18443 --rpc-auth admin1:123
 
-# (Esplora) In case when the Bitcoin RPC node doesn't require auth credentials.
-yuv-cli --config ./usd.toml unfreeze 477df4cb007a46fe9efd7de75ffa7012846d9babea3f31bbb50c9b93f12ff7f5 0 --rpc-url http://127.0.0.1:18443
-
-# (BitcoinRpc)
+```sh
 yuv-cli --config ./usd.toml unfreeze 477df4cb007a46fe9efd7de75ffa7012846d9babea3f31bbb50c9b93f12ff7f5 0
 ```
 
@@ -703,11 +739,60 @@ yuv-cli --config ./bob.toml bulletproof check --value 1000 --tx-id $TRANSFER_TX_
 ```
 
 [step 1]: #1-synchronize-the-wallet-history
+
 [step 2]: #2-generate-usd-issuer-and-eur-issuer-key-pairs
+
 [step 3]: #3-generate-alice-and-bob-key-pairs
+
 [step 4]: #4-create-issuances-for-alice
+
 [step 5]: #5-transfer-from-alice-to-bob
+
 [step 6]: #6-freeze-bobs-output
+
 [step 7]: #7-create-unfreeze-transaction-for-bobs-output
-[step 8]: #8-bulletproofs
+
 [usage]: #usage
+
+#### 9. Chroma announcement
+
+Any issuer can announce a new Chroma (new token) to the network. This is done by creating a
+transaction with a single output that contains `OP_RETURN` with information about the new Chroma.
+
+The next data is contained in the Chroma announcement:
+
+- `chroma` - 32 bytes [`Chroma`].
+- `name` - 1 + [3 - 32] bytes name of the token. Where the first byte is the length of the name.
+- `symbol` - 1 + [3 - 16] bytes symbol of the token. Where the first byte is the length of the
+  symbol.
+- `decimal` - 1 byte number of decimal places for the token.
+- `max_supply` - 8 bytes maximum supply of the token.
+- `is_freezable` - 1 byte indicates whether the token can be freezed or not by the issuer.
+
+To announce a new Chroma with `yuv-cli` you need to execute the following command:
+
+```sh
+yuv-cli --config ./usd.toml chroma announcement --name "Some name" --symbol SMN --decimal 2
+```
+
+`chroma` isn't specified, so it was taken from the config. In this case the `max_supply` is 0 -
+unlimited. `is_freezable` is set to `true` by default.
+
+As a result, you will get the transaction ID of the Chroma announcement transaction.
+
+To check the Chroma announcement, you can use the following command:
+
+```sh
+yuv-cli --config ./alice.toml chroma info $USD
+```
+
+Result:
+
+```text
+Chroma: bcrt1p4v5dxtlzrrfuk57nxr3d6gwmtved47ulc55kcsk30h93e43ma2eqvrek30
+Name: Some name
+Symbol: SMN
+Decimal: 2
+Max supply: unlimited
+Is freezable: true
+```

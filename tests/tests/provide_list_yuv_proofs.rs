@@ -4,7 +4,7 @@
 //! nodes accepted them.
 
 use bdk::{bitcoincore_rpc::RpcApi, miniscript::ToPublicKey};
-use bitcoin::{secp256k1::Secp256k1, PrivateKey, Script};
+use bitcoin::{secp256k1::Secp256k1, PrivateKey};
 use once_cell::sync::Lazy;
 
 mod common;
@@ -56,7 +56,7 @@ async fn test_provide_list_yuv_proofs() -> eyre::Result<()> {
 
     usd_issuer.sync(SyncOptions::default()).await?;
 
-    const ISSUANCE_AMOUNT: u64 = 10_000;
+    const ISSUANCE_AMOUNT: u128 = 10_000;
 
     let alice_pubkey = ALICE.public_key(&secp);
 
@@ -68,13 +68,10 @@ async fn test_provide_list_yuv_proofs() -> eyre::Result<()> {
     let usd_issuance = {
         let mut builder = usd_issuer.build_issuance()?;
 
-        let alice_script_pubkey =
-            Script::new_v0_p2wpkh(&alice.public_key().wpubkey_hash().unwrap());
-
         builder
             .add_recipient(&alice_pubkey.inner, ISSUANCE_AMOUNT, 1000)
             // Fund alice with 50_000 sats
-            .add_sats_recipient(alice_script_pubkey, 50_000)
+            .add_sats_recipient(&alice_pubkey.inner, 50_000)
             .set_fee_rate_strategy(fee_rate_strategy);
 
         builder.finish(&blockchain).await?
@@ -91,7 +88,7 @@ async fn test_provide_list_yuv_proofs() -> eyre::Result<()> {
     let mut raw_txs = Vec::new();
     raw_txs.push(usd_issuance.clone());
 
-    yuv_client_1.send_raw_yuv_tx(usd_issuance).await?;
+    yuv_client_1.send_raw_yuv_tx(usd_issuance, None).await?;
 
     // Add block with issuance to the chain
     blockchain_rpc.generate_to_address(1, &alice.address()?)?;
@@ -107,7 +104,7 @@ async fn test_provide_list_yuv_proofs() -> eyre::Result<()> {
 
     let bob_pubkey = BOB.public_key(&secp);
 
-    const TRANSFER_AMOUNT: u64 = 100;
+    const TRANSFER_AMOUNT: u128 = 100;
 
     // =============================
     // 2. Transfer USD tokens from ALICE to BOB
@@ -136,7 +133,9 @@ async fn test_provide_list_yuv_proofs() -> eyre::Result<()> {
 
         raw_txs.push(alice_bob_transfer.clone());
 
-        yuv_client_1.send_raw_yuv_tx(alice_bob_transfer).await?;
+        yuv_client_1
+            .send_raw_yuv_tx(alice_bob_transfer, None)
+            .await?;
 
         // Add block with transfer to the chain
         blockchain_rpc.generate_to_address(7, &alice.address()?)?;

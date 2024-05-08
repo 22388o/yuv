@@ -27,11 +27,11 @@ jsonrpsee = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
+config = { workspace = true }
 
 indicatif = { version = "0.17.8" }
 serde_json = { version = "1.0" }
 serde_yaml = { version = "0.9.25" }
-config = { version = "0.13.3" }
 toml = { version = "0.8.12" }
 color-eyre = { version = "0.6.2" }
 log = { version = "0.4.20" }

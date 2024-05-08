@@ -1,4 +1,6 @@
 
+![image](../../.assets/logo.png)
+
 <h1 align="center">
     Bulletproof
 </h1>
@@ -11,7 +13,7 @@ This crate provides a pure Rust implementation of [Bulletproof Plus](https://epr
 use rand::RngCore;
 
 fn main() {
-    let value = 200u64;
+    let value = 200u128;
 
     let mut blinding = [0u8; 32];
 

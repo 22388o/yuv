@@ -12,6 +12,7 @@ leveldb = ["dep:rusty-leveldb"]
 
 [dependencies]
 yuv-types = { path = "../types", features = ["serde"] }
+yuv-pixels = { path = "../pixels", features = ["serde"] }
 
 bitcoin = { workspace = true, features = ["serde"] }
 thiserror = { workspace = true }
@@ -19,7 +20,7 @@ async-trait = { workspace = true }
 eyre = { workspace = true }
 serde = { workspace = true }
 
-serde_cbor = { workspace = true }
+ciborium = { workspace = true }
 serde_bytes = { version = "0.11.14" }
 
 tokio = { workspace = true, features = [

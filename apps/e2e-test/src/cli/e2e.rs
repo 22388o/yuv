@@ -20,7 +20,7 @@ use bitcoin::{
         rand::{seq::IteratorRandom, thread_rng},
         All, Secp256k1,
     },
-    Network, PrivateKey, Script,
+    Network, PrivateKey, PublicKey,
 };
 use tokio::sync::mpsc::unbounded_channel;
 use tracing::{info, span, Instrument, Level};
@@ -67,15 +67,12 @@ impl E2e {
         }
 
         // Convert private keys to `Vec<Script>`, that will be used to fund the accounts with satoshis.
-        let addresses = Arc::new(
+        let funding_recipients = Arc::new(
             recipients
                 .clone()
                 .iter()
-                .map(|sk| {
-                    let pubkey = sk.public_key(&Secp256k1::new());
-                    Script::new_v0_p2wpkh(&pubkey.wpubkey_hash().unwrap())
-                })
-                .collect::<Vec<Script>>(),
+                .map(|sk| sk.public_key(&Secp256k1::new()))
+                .collect::<Vec<PublicKey>>(),
         );
 
         // Pick the funder.
@@ -86,7 +83,7 @@ impl E2e {
 
         // Perform the initial funding.
         faucet
-            .fund_accounts(Arc::clone(&addresses))
+            .fund_accounts(Arc::clone(&funding_recipients))
             .instrument(faucet_span.clone())
             .await?;
 
@@ -95,7 +92,11 @@ impl E2e {
         let funding_interval = Duration::from_secs(self.config.accounts.funding_interval);
         self.task_tracker.spawn(
             faucet
-                .run(funding_interval, Arc::clone(&addresses), cancellation_token)
+                .run(
+                    funding_interval,
+                    Arc::clone(&funding_recipients),
+                    cancellation_token,
+                )
                 .instrument(faucet_span),
         );
 
@@ -103,7 +104,7 @@ impl E2e {
         let (tx_sender, tx_receiver) = unbounded_channel::<YuvTransaction>();
         // Initialize the queue to send balances from accounts to the tx checker.
         let (balance_sender, balance_receiver) =
-            unbounded_channel::<(PrivateKey, HashMap<Chroma, u64>)>();
+            unbounded_channel::<(PrivateKey, HashMap<Chroma, u128>)>();
 
         // Initialize the tx checker.
         let tx_checker = TxChecker::new(

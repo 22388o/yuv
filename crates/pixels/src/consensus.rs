@@ -1,6 +1,9 @@
 use alloc::vec::Vec;
 use core2::io;
 
+#[cfg(feature = "bulletproof")]
+use alloc::boxed::Box;
+
 use bitcoin::{
     consensus::{encode::Error as EncodeError, Decodable, Encodable},
     hashes::hash160,
@@ -17,7 +20,10 @@ use bulletproof::{
 #[cfg(feature = "bulletproof")]
 use crate::Bulletproof;
 use crate::{
-    proof::htlc::{HtlcScriptKind, LightningHtlcData, LightningHtlcProof},
+    proof::{
+        htlc::{HtlcScriptKind, LightningHtlcData, LightningHtlcProof},
+        EmptyPixelProof,
+    },
     LightningCommitmentProof, MultisigPixelProof, Pixel, PixelProof, SigPixelProof, PIXEL_SIZE,
 };
 
@@ -28,6 +34,7 @@ const LIGHTNING_FLAG: u8 = 2u8;
 const LIGHTNING_HTLC_FLAG: u8 = 3u8;
 #[cfg(feature = "bulletproof")]
 const BULLETPROOF_FLAG: u8 = 4u8;
+const EMPTY_PIXEL_FLAG: u8 = 5u8;
 
 // Htlc script flags
 const OFFERED_CONSENSUS_FLAG: u8 = 0u8;
@@ -78,6 +85,10 @@ impl Encodable for PixelProof {
                 len += LIGHTNING_HTLC_FLAG.consensus_encode(writer)?;
                 len += htlc_proof.consensus_encode(writer)?;
             }
+            PixelProof::EmptyPixel(empty_pixelproof) => {
+                len += EMPTY_PIXEL_FLAG.consensus_encode(writer)?;
+                len += empty_pixelproof.consensus_encode(writer)?;
+            }
         }
 
         Ok(len)
@@ -109,6 +120,10 @@ impl Decodable for PixelProof {
             BULLETPROOF_FLAG => {
                 let proof: Bulletproof = Decodable::consensus_decode(reader)?;
                 Ok(PixelProof::Bulletproof(Box::new(proof)))
+            }
+            EMPTY_PIXEL_FLAG => {
+                let proof: EmptyPixelProof = Decodable::consensus_decode(reader)?;
+                Ok(PixelProof::EmptyPixel(proof))
             }
             _ => Err(EncodeError::ParseFailed("Unknown pixel proof")),
         }
@@ -186,6 +201,22 @@ impl Decodable for SigPixelProof {
         let inner_key = secp256k1::PublicKey::deserialize(&bytes)?;
 
         Ok(SigPixelProof::new(pixel, inner_key))
+    }
+}
+
+impl Encodable for EmptyPixelProof {
+    fn consensus_encode<W: io::Write + ?Sized>(&self, writer: &mut W) -> Result<usize, io::Error> {
+        writer.write(&self.inner_key.serialize())
+    }
+}
+
+impl Decodable for EmptyPixelProof {
+    fn consensus_decode<R: io::Read + ?Sized>(reader: &mut R) -> Result<Self, EncodeError> {
+        let mut bytes = [0u8; PUBLIC_KEY_SIZE];
+        reader.read_exact(&mut bytes)?;
+        let inner_key = secp256k1::PublicKey::deserialize(&bytes)?;
+
+        Ok(EmptyPixelProof::new(inner_key))
     }
 }
 

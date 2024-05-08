@@ -8,7 +8,7 @@ environments for YUV project.
 To build new version of `yuvd` docker container you need to run `docker build`
 with these options from root of the repo:
 
-``` sh
+```sh
 docker build -f ./infrastructure/build/yuvd.dockerfile -t akitamiabtc/yuvd .
 ```
 
@@ -16,7 +16,7 @@ docker build -f ./infrastructure/build/yuvd.dockerfile -t akitamiabtc/yuvd .
 
 Start services with `docker-compose`:
 
-``` sh
+```sh
 # Regular setup for development with one node
 docker compose --file ./infrastructure/dev/docker-compose.yaml --project-directory . up
 
@@ -31,3 +31,8 @@ docker compose --file ./infrastructure/dev/docker-compose.yaml --project-directo
 ```
 
 There is an issue for docker compose while using both profiled and non-profiled setup, so if you would have network issues you could use `--force-recreate` flag at the end
+
+## Regtest interactions
+
+For regtest interactions you would need to have some bitcoin. To get some, you could mine block to your address using command 
+`bitcoin-cli -regtest generatetoaddress 1 <address>` inside bitcoin node container.

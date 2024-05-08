@@ -47,7 +47,7 @@ pub trait BusEvent: Send {
 /// full_event_bus.register::<MyEvent>(None);
 ///
 /// // Extracting channel for MyEvent event. You aren't obligated
-/// // to extract channels, so you can use ful_event_bus instead.
+/// // to extract channels, so you can use full_event_bus instead.
 /// let mut event_bus = full_event_bus.extract(&typeid![MyEvent], &typeid![MyEvent]).unwrap();
 ///
 /// // Sending event to channel.

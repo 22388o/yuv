@@ -18,6 +18,9 @@ pub enum CheckError {
         error: PixelProofError,
     },
 
+    #[error("Number of pixel proofs must be the same as the number of Bitcoin outputs")]
+    NotEnoughProofs { provided: usize, required: usize },
+
     /// There is no signature and/or pubkey in p2wpkh transaction.
     #[error("Invalid witness structure")]
     InvalidWitness,
@@ -69,6 +72,15 @@ pub enum CheckError {
 
     #[error("Tx not found {0}")]
     TxNotFound(Txid),
+
+    #[error("Announced amount {0} does not match to amount in pixel proofs {1}")]
+    AnnouncedAmountDoesNotMatch(u128, u128),
+
+    #[error("Provided announcement mismatch with the announcement in transaction")]
+    IssueAnnouncementMismatch,
+
+    #[error("Provided transaction doesn't have an announcement")]
+    IssueAnnouncementNotProvided,
 }
 
 /// [`TransactionChecker`](crate::TransactionChecker) errors.

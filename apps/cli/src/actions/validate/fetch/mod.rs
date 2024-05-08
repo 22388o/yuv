@@ -4,8 +4,9 @@ use bdk::blockchain::GetTx;
 use bitcoin::Txid;
 use clap::Args;
 use color_eyre::eyre;
+use ydk::txbuilder::form_issue_announcement;
 use yuv_tx_check::{check_transaction, CheckError};
-use yuv_types::{ProofMap, Proofs, YuvTransaction, YuvTxType};
+use yuv_types::{ProofMap, TransferProofs, YuvTransaction, YuvTxType};
 
 use crate::context::Context;
 
@@ -25,7 +26,7 @@ pub(crate) async fn run(
 ) -> eyre::Result<()> {
     let blockchain = context.blockchain()?;
 
-    let Proofs {
+    let TransferProofs {
         input: input_proofs_map,
         output: output_proofs_map,
     } = proofs.into_proof_maps()?;
@@ -46,19 +47,20 @@ pub async fn check_p2wpkh_tx_by_id(
     inputs: ProofMap,
     outputs: ProofMap,
 ) -> eyre::Result<()> {
+    // Check that transaction exists at all
+    let Some(tx) = bitcoin_provider.get_tx(tx_id)? else {
+        return Err(CheckError::TxNotFound(*tx_id).into());
+    };
+
     let yuv_tx_type = match inputs.is_empty() {
         true => YuvTxType::Issue {
-            output_proofs: outputs,
+            output_proofs: Some(outputs.clone()),
+            announcement: form_issue_announcement(outputs.into_values().collect())?,
         },
         false => YuvTxType::Transfer {
             input_proofs: inputs,
             output_proofs: outputs,
         },
-    };
-
-    // Check that transaction exists at all
-    let Some(tx) = bitcoin_provider.get_tx(tx_id)? else {
-        return Err(CheckError::TxNotFound(*tx_id).into());
     };
 
     check_transaction(&YuvTransaction {

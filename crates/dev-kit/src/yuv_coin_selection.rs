@@ -1,4 +1,4 @@
-use crate::types::{FeeRate, Utxo, WeightedUtxo};
+use crate::types::{Utxo, WeightedUtxo};
 use bdk::Error;
 use bitcoin::Script;
 use yuv_pixels::Chroma;
@@ -7,40 +7,13 @@ use yuv_pixels::Chroma;
 /// overridden
 pub type DefaultCoinSelectionAlgorithm = YuvLargestFirstCoinSelection;
 
-// Base weight of a Txin, not counting the weight needed for satisfying it.
-// prev_txid (32 bytes) + prev_vout (4 bytes) + sequence (4 bytes)
-pub(crate) const TXIN_BASE_WEIGHT: usize = (32 + 4 + 4) * 4;
-
-#[derive(Debug)]
-/// Remaining amount after performing coin selection
-pub enum Excess {
-    /// It's not possible to create spendable output from excess using the current drain output
-    NoChange {
-        /// Threshold to consider amount as dust for this particular change script_pubkey
-        dust_threshold: u64,
-        /// Exceeding amount of current selection over outgoing value and fee costs
-        remaining_amount: u64,
-        /// The calculated fee for the drain TxOut with the selected script_pubkey
-        change_fee: u64,
-    },
-    /// It's possible to create spendable output from excess using the current drain output
-    Change {
-        /// Effective amount available to create change after deducting the change output fee
-        amount: u64,
-        /// The deducted change output fee
-        fee: u64,
-    },
-}
-
 /// Result of a successful coin selection
 #[derive(Debug)]
 pub struct YUVCoinSelectionResult {
     /// List of outputs selected for use as inputs
     pub selected: Vec<Utxo>,
-    /// Total fee amount for the selected utxos in satoshis
-    pub fee_amount: u64,
     /// Remaining amount after deducting fees and outgoing outputs
-    pub amount: u64,
+    pub amount: u128,
 }
 
 impl YUVCoinSelectionResult {
@@ -48,7 +21,7 @@ impl YUVCoinSelectionResult {
     pub fn selected_amount(&self) -> u128 {
         self.selected
             .iter()
-            .map(|u| u.yuv_txout().pixel.luma.amount as u128)
+            .map(|u| u.yuv_txout().pixel.luma.amount)
             .sum()
     }
 
@@ -56,7 +29,7 @@ impl YUVCoinSelectionResult {
     pub fn local_selected_amount(&self) -> u128 {
         self.selected
             .iter()
-            .map(|u| u.yuv_txout().pixel.luma.amount as u128)
+            .map(|u| u.yuv_txout().pixel.luma.amount)
             .sum()
     }
 }
@@ -82,8 +55,7 @@ pub trait YUVCoinSelectionAlgorithm: core::fmt::Debug {
         &self,
         required_utxos: Vec<WeightedUtxo>,
         optional_utxos: Vec<WeightedUtxo>,
-        fee_rate: FeeRate,
-        target_amount: u64,
+        target_amount: u128,
         drain_script: &Script,
         target_token: Chroma,
     ) -> Result<YUVCoinSelectionResult, Error>;
@@ -105,19 +77,17 @@ impl YUVCoinSelectionAlgorithm for YuvLargestFirstCoinSelection {
         &self,
         required_utxos: Vec<WeightedUtxo>,
         mut optional_utxos: Vec<WeightedUtxo>,
-        fee_rate: FeeRate,
-        target_amount: u64,
+        target_amount: u128,
         drain_script: &Script,
         target_chroma: Chroma,
     ) -> Result<YUVCoinSelectionResult, Error> {
-        tracing::debug!(
-            "target_amount = `{}`, fee_rate = `{:?}`",
-            target_amount,
-            fee_rate
-        );
+        tracing::debug!("target_amount = `{}`", target_amount);
 
         // Filter UTXOs based on the target token.
-        optional_utxos.retain(|wu| wu.utxo.yuv_txout().pixel.chroma == target_chroma);
+        optional_utxos.retain(|wu| {
+            wu.utxo.yuv_txout().pixel.chroma == target_chroma
+                && !wu.utxo.yuv_txout().script_pubkey.is_op_return()
+        });
 
         // We put the "required UTXOs" first and make sure the optional UTXOs are sorted,
         // initially smallest to largest, before being reversed with `.rev()`.
@@ -129,7 +99,7 @@ impl YUVCoinSelectionAlgorithm for YuvLargestFirstCoinSelection {
                 .chain(optional_utxos.into_iter().rev().map(|utxo| (false, utxo)))
         };
 
-        select_sorted_utxos(utxos, fee_rate, target_amount, drain_script)
+        select_sorted_utxos(utxos, target_amount, drain_script)
     }
 }
 
@@ -145,8 +115,7 @@ impl YUVCoinSelectionAlgorithm for YUVOldestFirstCoinSelection {
         &self,
         required_utxos: Vec<WeightedUtxo>,
         mut optional_utxos: Vec<WeightedUtxo>,
-        fee_rate: FeeRate,
-        target_amount: u64,
+        target_amount: u128,
         drain_script: &Script,
         target_chroma: Chroma,
     ) -> Result<YUVCoinSelectionResult, Error> {
@@ -162,47 +131,29 @@ impl YUVCoinSelectionAlgorithm for YUVOldestFirstCoinSelection {
                 .chain(optional_utxos.into_iter().map(|utxo| (false, utxo)))
         };
 
-        select_sorted_utxos(utxos, fee_rate, target_amount, drain_script)
+        select_sorted_utxos(utxos, target_amount, drain_script)
     }
 }
 
 fn select_sorted_utxos(
     utxos: impl Iterator<Item = (bool, WeightedUtxo)>,
-    fee_rate: FeeRate,
-    target_amount: u64,
+    target_amount: u128,
     _drain_script: &Script,
 ) -> Result<YUVCoinSelectionResult, Error> {
     let mut yuv_amount = 0;
-    let mut fee_amount = 0;
-    let mut satoshi_amount = 0; // Add a new variable to track the sum of txout().value
     let selected = utxos
-        .scan(
-            (&mut yuv_amount, &mut fee_amount, &mut satoshi_amount), // Include satoshi_amount here
-            |(yuv_amount, fee_amount, satoshi_amount), (must_use, weighted_utxo)| {
-                if must_use || **yuv_amount < target_amount || **satoshi_amount <= **fee_amount {
-                    **fee_amount +=
-                        fee_rate.fee_wu(TXIN_BASE_WEIGHT + weighted_utxo.satisfaction_weight);
-                    **yuv_amount += weighted_utxo.utxo.yuv_txout().pixel.luma.amount; // Use yuv amount here
-                    **satoshi_amount += weighted_utxo.utxo.yuv_txout().satoshis; // Track the sum of satoshis
-
-                    Some(weighted_utxo.utxo)
-                } else {
-                    None
-                }
-            },
-        )
+        .scan(&mut yuv_amount, |yuv_amount, (must_use, weighted_utxo)| {
+            if must_use || **yuv_amount < target_amount {
+                **yuv_amount += weighted_utxo.utxo.yuv_txout().pixel.luma.amount;
+                Some(weighted_utxo.utxo)
+            } else {
+                None
+            }
+        })
         .collect::<Vec<_>>();
-
-    if satoshi_amount < fee_amount {
-        return Err(Error::InsufficientFunds {
-            needed: fee_amount,
-            available: satoshi_amount,
-        });
-    }
 
     Ok(YUVCoinSelectionResult {
         selected,
-        fee_amount, // Update fee calculation based on the sum of value
         amount: yuv_amount,
     })
 }
@@ -242,7 +193,7 @@ mod test {
                     satoshis,
                     script_pubkey: Script::new(),
                     pixel: Pixel {
-                        luma: Luma::from(yuv_amount as u64),
+                        luma: Luma::from(yuv_amount),
                         chroma: token.into(),
                     },
                 },
@@ -296,7 +247,6 @@ mod test {
             .coin_select(
                 utxos,
                 vec![],
-                FeeRate::from_sat_per_vb(1.0),
                 target_amount,
                 &drain_script,
                 Chroma::from_str(
@@ -308,6 +258,5 @@ mod test {
 
         assert_eq!(result.selected.len(), 3);
         assert_eq!(result.selected_amount(), 790_000);
-        assert_eq!(result.fee_amount, 204)
     }
 }

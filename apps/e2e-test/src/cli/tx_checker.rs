@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::HashMap,
     fs::File,
     ops::{AddAssign, SubAssign},
     str::FromStr,
@@ -21,9 +21,9 @@ use once_cell::sync::Lazy;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, span, warn, Level};
-use yuv_pixels::{Chroma, PixelProof};
+use yuv_pixels::Chroma;
 use yuv_rpc_api::transactions::{GetRawYuvTransactionResponse, YuvTransactionsRpcClient};
-use yuv_types::YuvTransaction;
+use yuv_types::{ProofMap, YuvTransaction};
 
 use crate::{cli::e2e::NETWORK, config::TestConfig};
 
@@ -34,7 +34,7 @@ static ADDRESS: Lazy<Address> = Lazy::new(|| {
 const BITCOIN_NODE_ERROR_SLEEP_DURATION: Duration = Duration::from_secs(30);
 const DEFAULT_RESULT_PATH: &str = "result.dev.csv";
 
-type Amounts = HashMap<PublicKey, HashMap<Chroma, u64>>;
+type Amounts = HashMap<PublicKey, HashMap<Chroma, u128>>;
 
 pub(crate) struct TxChecker {
     config: TestConfig,
@@ -69,7 +69,7 @@ impl TxChecker {
         mut self,
         cancellation_token: CancellationToken,
         mut tx_receiver: UnboundedReceiver<YuvTransaction>,
-        mut balance_receiver: UnboundedReceiver<(PrivateKey, HashMap<Chroma, u64>)>,
+        mut balance_receiver: UnboundedReceiver<(PrivateKey, HashMap<Chroma, u128>)>,
     ) -> eyre::Result<()> {
         info!("Waiting for transactions");
 
@@ -230,15 +230,18 @@ impl TxChecker {
     /// and increases it for the output proofs.
     fn update_amount(&mut self, tx: YuvTransaction) -> eyre::Result<()> {
         match &tx.tx_type {
-            yuv_types::YuvTxType::Issue { output_proofs } => {
-                self.handle_proofs(output_proofs, u64::add_assign);
+            yuv_types::YuvTxType::Issue { output_proofs, .. } => {
+                self.handle_proofs(
+                    &output_proofs.clone().expect("Outputs should be present"),
+                    u128::add_assign,
+                );
             }
             yuv_types::YuvTxType::Transfer {
                 input_proofs,
                 output_proofs,
             } => {
-                self.handle_proofs(input_proofs, u64::sub_assign);
-                self.handle_proofs(output_proofs, u64::add_assign);
+                self.handle_proofs(input_proofs, u128::sub_assign);
+                self.handle_proofs(output_proofs, u128::add_assign);
             }
             _ => return Ok(()),
         };
@@ -248,11 +251,7 @@ impl TxChecker {
 
     /// `handle_proofs` changes the expected balances using the passed operation
     /// which is supposed to be either `AddAssign` or `SubAssign`.
-    fn handle_proofs<F: Fn(&mut u64, u64)>(
-        &mut self,
-        pixel_proofs: &BTreeMap<u32, PixelProof>,
-        op: F,
-    ) {
+    fn handle_proofs<F: Fn(&mut u128, u128)>(&mut self, pixel_proofs: &ProofMap, op: F) {
         for pixel_proof in pixel_proofs.values() {
             let (recipient, pixel) = match pixel_proof {
                 yuv_pixels::PixelProof::Sig(proof) => (proof.inner_key, proof.pixel),
@@ -274,7 +273,7 @@ impl TxChecker {
     fn check_balance(
         &self,
         private_key: PrivateKey,
-        balances: HashMap<Chroma, u64>,
+        balances: HashMap<Chroma, u128>,
         secp: &Secp256k1<All>,
     ) {
         let pubkey = PublicKey::from_secret_key(secp, &private_key.inner);

@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use crate::actions::chroma::ChromaCommands;
 use clap::{Parser, Subcommand};
 use color_eyre::eyre;
 use log::LevelFilter;
@@ -22,6 +23,7 @@ use crate::context::Context;
 mod balances;
 #[cfg(feature = "bulletproof")]
 mod bulletproof;
+mod chroma;
 mod convert;
 mod freeze;
 mod generate;
@@ -32,6 +34,7 @@ mod p2wpkh;
 mod proof;
 mod provide;
 mod rpc_args;
+mod sweep;
 mod transfer;
 mod utxos;
 mod validate;
@@ -69,6 +72,10 @@ pub enum Commands {
     /// Transfer tokens
     Transfer(TransferArgs),
 
+    /// Sweep tweaked Bitcoin UTXOs created with the YUV protocol.
+    /// Outputs will be sweeped to a p2wpkh address.
+    Sweep,
+
     /// Validate pixel proof of provided transaction.
     Validate(ValidateArgs),
 
@@ -102,6 +109,10 @@ pub enum Commands {
     #[cfg(feature = "bulletproof")]
     #[command(subcommand)]
     Bulletproof(bulletproof::BulletproofCommands),
+
+    /// Provides command to create Chroma announcement, and retrieve info about the token.
+    #[command(subcommand)]
+    Chroma(ChromaCommands),
 }
 
 impl Cli {
@@ -145,5 +156,7 @@ async fn execute_command(command: Commands, context: Context) -> eyre::Result<()
         Cmd::Convert(args) => convert::run(args),
         Cmd::P2WPKH => p2wpkh::run(context),
         Cmd::P2TR => p2tr::run(context),
+        Cmd::Sweep => sweep::run(context).await,
+        Cmd::Chroma(cmd) => chroma::run(cmd, context).await,
     }
 }

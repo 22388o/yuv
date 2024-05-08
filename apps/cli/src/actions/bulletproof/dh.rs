@@ -11,8 +11,7 @@ use crate::context::Context;
 
 #[derive(Args, Debug)]
 pub struct DhArgs {
-    #[clap(long)]
-    #[arg(value_parser = Chroma::from_address)]
+    #[clap(long, value_parser = Chroma::from_address)]
     pub recipient: Chroma,
 }
 

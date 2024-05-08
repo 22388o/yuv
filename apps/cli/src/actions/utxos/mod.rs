@@ -9,8 +9,7 @@ use crate::context::Context;
 #[derive(Args, Debug)]
 pub struct UtxosArgs {
     /// Chroma of the token
-    #[clap(long)]
-    #[arg(value_parser = Chroma::from_address)]
+    #[clap(long, value_parser = Chroma::from_address)]
     pub chroma: Option<Chroma>,
 }
 
@@ -30,7 +29,7 @@ pub async fn run(UtxosArgs { chroma }: UtxosArgs, mut ctx: Context) -> eyre::Res
 }
 
 fn show_all_utxos(wallet: &StorageWallet, network: Network) {
-    let utxos = wallet.utxos();
+    let utxos = wallet.yuv_utxos();
 
     for (OutPoint { txid, vout }, proof) in utxos {
         let pixel = proof.pixel();

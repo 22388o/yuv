@@ -20,12 +20,12 @@ tracing-subscriber = { workspace = true, features = ["fmt", "json"] }
 bitcoin = { workspace = true, features = ["serde"] }
 eyre = { workspace = true }
 jsonrpsee = { workspace = true }
+config = { workspace = true }
 serde = { workspace = true, features = ["rc"] }
 
 clap = { version = "4.1.6", features = ["derive", "cargo"] }
 serde_json = { version = "1.0" }
 uuid = { version = "1.4.1", features = ["serde", "v4"] }
-config = { version = "0.13.3" }
 futures = { version = "0.3.30" }
 once_cell = { version = "1.19.0" }
 rand = { version = "0.8.5" }

@@ -239,7 +239,7 @@ impl YuvTxOut {
     /// per current Core policy.
     ///
     /// The current dust fee rate is 3 sat/vB.
-    pub fn minimal_non_dust(script_pubkey: Script, amount: u64, chroma: Chroma) -> Self {
+    pub fn minimal_non_dust(script_pubkey: Script, amount: u128, chroma: Chroma) -> Self {
         let len = script_pubkey.len() + bitcoin::VarInt(script_pubkey.len() as u64).len() + 8;
         let len = len
             + if script_pubkey.is_witness_program() {

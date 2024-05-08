@@ -62,7 +62,7 @@ mod tests {
     use core::str::FromStr;
     use once_cell::sync::Lazy;
 
-    const AMOUNT: u64 = 100;
+    const AMOUNT: u128 = 100;
 
     static PUBKEY: Lazy<PublicKey> = Lazy::new(|| {
         PublicKey::from_str("03ab5575d69e46968a528cd6fa2a35dd7808fea24a12b41dc65c7502108c75f9a9")
@@ -71,7 +71,7 @@ mod tests {
 
     static MOCKED_HASH_STR: Lazy<Hash> = Lazy::new(|| {
         Hash::from_slice(
-            &hex::decode("8a5cc8c0c3fabb1bd5ba9f961b6b432c2de5e1272a7b6c98b2aaabc7c5e41c8e")
+            &hex::decode("f9920f82135dfaa60a768391e3741a31b3d6503be9b7e2422c06877a2e300e64")
                 .unwrap(),
         )
         .unwrap()

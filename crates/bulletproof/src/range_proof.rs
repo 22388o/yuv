@@ -18,7 +18,7 @@ pub fn commit(v: k256::Scalar, r: k256::Scalar) -> k256::ProjectivePoint {
     (*G * v) + (*H * r)
 }
 
-/// Proof that a value is in the range [0, 2^64).
+/// Proof that a value is in the range [0, 2^128).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RangeProof {
     a: k256::ProjectivePoint,
@@ -57,14 +57,14 @@ fn calculate_point(
 ) -> k256::Scalar {
     transcript.append_message(b"a", a.to_bytes().as_ref());
 
-    let mut raw_point = [0u8; 64];
+    let mut raw_point = [0u8; 128];
     transcript.challenge_bytes(label, &mut raw_point);
 
     hash_to_point(&raw_point)
 }
 
 /// Generate a range proof for a value with a blinding factor.
-pub fn generate(value: u64, blinding: k256::Scalar) -> (RangeProof, k256::ProjectivePoint) {
+pub fn generate(value: u128, blinding: k256::Scalar) -> (RangeProof, k256::ProjectivePoint) {
     let mut transcript = Transcript::new(b"range_proof");
 
     // v * G + r * H
@@ -121,10 +121,10 @@ pub(crate) fn verify(commit: k256::ProjectivePoint, proof: RangeProof) -> bool {
     verifier.verify_vartime()
 }
 
-/// A_l = {x| 0 <= x < 64, x = v >> i & 1}
-fn calculate_a_l(value: u64) -> Vec<k256::Scalar> {
+/// A_l = {x| 0 <= x < 128, x = v >> i & 1}
+fn calculate_a_l(value: u128) -> Vec<k256::Scalar> {
     let mut output = vec![];
-    for i in 0..64 {
+    for i in 0..128 {
         output.push(k256::Scalar::from((value >> i) & 1));
     }
 
@@ -157,8 +157,8 @@ fn calculate_a_hat(
     y: k256::Scalar,
     z: k256::Scalar,
 ) -> (Vec<k256::Scalar>, k256::Scalar, k256::ProjectivePoint) {
-    // powers = [2, 2^2, 2^3, ..., 2^64]
-    let powers = Vec::<k256::Scalar>::new_power(k256::Scalar::from(2u64), RANGE_PROOF_SIZE);
+    // powers = [2, 2^2, 2^3, ..., 2^128]
+    let powers = Vec::<k256::Scalar>::new_power(k256::Scalar::from(2u128), RANGE_PROOF_SIZE);
 
     // Y = [y, y*y, y*y*y, ..., y*y*...*y]
     let mut y_vec = vec![y];

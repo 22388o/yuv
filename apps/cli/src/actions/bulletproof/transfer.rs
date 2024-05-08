@@ -13,11 +13,11 @@ use super::ecdh;
 pub struct TransferArgs {
     /// Value to transfer
     #[clap(long)]
-    pub value: u64,
+    pub value: u128,
 
     /// Value to transfer to sender
     #[clap(long)]
-    pub residual: u64,
+    pub residual: u128,
 
     #[clap(long)]
     /// Satoshis to transfer
@@ -28,13 +28,11 @@ pub struct TransferArgs {
     pub residual_satoshis: u64,
 
     /// Type of the token, public key of the issuer.
-    #[clap(long)]
-    #[arg(value_parser = Chroma::from_address)]
+    #[clap(long, value_parser = Chroma::from_address)]
     pub chroma: Chroma,
 
     /// The public key of the receiver.
-    #[clap(long)]
-    #[arg(value_parser = Chroma::from_address)]
+    #[clap(long, value_parser = Chroma::from_address)]
     pub recipient: Chroma,
 
     /// The input tx id
@@ -130,7 +128,7 @@ pub async fn run(
 
     println!("{}", tx.bitcoin_tx.txid());
 
-    yuv_client.send_raw_yuv_tx(tx).await?;
+    yuv_client.send_raw_yuv_tx(tx, None).await?;
 
     Ok(())
 }

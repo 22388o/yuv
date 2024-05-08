@@ -6,7 +6,9 @@ use jsonrpsee::server::Server;
 use tokio_util::sync::CancellationToken;
 
 use yuv_rpc_api::transactions::YuvTransactionsRpcServer;
-use yuv_storage::{FrozenTxsStorage, PagesStorage, TransactionsStorage, TxStatesStorage};
+use yuv_storage::{
+    ChromaInfoStorage, FrozenTxsStorage, PagesStorage, TransactionsStorage, TxStatesStorage,
+};
 
 use crate::transactions::TransactionsController;
 
@@ -27,13 +29,13 @@ pub struct ServerConfig {
 }
 
 /// Runs YUV Node's RPC server.
-pub async fn run_server<S, FZS>(
+pub async fn run_server<S, AS>(
     ServerConfig {
         address,
         max_items_per_request,
     }: ServerConfig,
     txs_storage: S,
-    frozen_storage: FZS,
+    frozen_storage: AS,
     full_event_bus: EventBus,
     txs_states_storage: TxStatesStorage,
     bitcoin_client: Arc<BitcoinRpcClient>,
@@ -41,7 +43,7 @@ pub async fn run_server<S, FZS>(
 ) -> eyre::Result<()>
 where
     S: TransactionsStorage + PagesStorage + Clone + Send + Sync + 'static,
-    FZS: FrozenTxsStorage + Clone + Send + Sync + 'static,
+    AS: FrozenTxsStorage + ChromaInfoStorage + Clone + Send + Sync + 'static,
 {
     // The multiplication of average transaction size and max number of items
     // per request approximately gives the maximum JSON RPC request size.

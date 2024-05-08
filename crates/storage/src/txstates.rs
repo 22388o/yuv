@@ -2,7 +2,6 @@ use std::{collections::HashMap, sync::Arc};
 
 use bitcoin::Txid;
 use tokio::sync::RwLock;
-use yuv_types::TxState;
 
 #[derive(Debug, Clone, Default)]
 pub struct TxStatesStorage {
@@ -67,4 +66,16 @@ impl TxStatesStorage {
         let tx_states = self.tx_states.read().await;
         tx_states.is_empty()
     }
+}
+
+/// Transaction states that are stored in storage.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+#[repr(u8)]
+pub enum TxState {
+    /// Transaction is pending to be checked.
+    Pending = 1,
+
+    /// Transaction is checked and ready to be attached.
+    Checked = 2,
 }

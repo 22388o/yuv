@@ -1,5 +1,7 @@
 use bitcoin::Txid;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
+use yuv_pixels::Chroma;
+use yuv_types::announcements::ChromaInfo;
 use yuv_types::YuvTransaction;
 
 /// Response for [`getrawyuvtransaction`](YuvTransactionsRpcServer::get_raw_yuv_transaction) RPC
@@ -73,7 +75,11 @@ pub trait YuvTransactionsRpc {
 
     /// Send YUV transaction to Bitcoin network.
     #[method(name = "sendrawyuvtransaction")]
-    async fn send_raw_yuv_tx(&self, yuv_tx: YuvTransaction) -> RpcResult<bool>;
+    async fn send_raw_yuv_tx(
+        &self,
+        yuv_tx: YuvTransaction,
+        max_burn_amount: Option<u64>,
+    ) -> RpcResult<bool>;
 
     /// Check if YUV transaction is frozen or not.
     #[method(name = "isyuvtxoutfrozen")]
@@ -89,4 +95,8 @@ pub trait YuvTransactionsRpc {
         &self,
         yuv_tx: YuvTransaction,
     ) -> RpcResult<EmulateYuvTransactionResponse>;
+
+    /// Get the [ChromaInfo] that contains the information about the token.
+    #[method(name = "getchromainfo")]
+    async fn get_chroma_info(&self, chroma: Chroma) -> RpcResult<Option<ChromaInfo>>;
 }

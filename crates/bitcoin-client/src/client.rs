@@ -163,6 +163,9 @@ pub enum Error {
     /// The JSON result had an unexpected structure.
     #[error("the JSON result had an unexpected structure")]
     UnexpectedStructure,
+
+    #[error("Unsupported version Bitcoin Core RPC")]
+    UnsupportedVersion,
 }
 
 #[cfg(test)]

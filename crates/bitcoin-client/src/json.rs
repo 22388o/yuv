@@ -1341,7 +1341,7 @@ fn deserialize_hex_array_opt<'de, D>(deserializer: D) -> Result<Option<Vec<Vec<u
 where
     D: serde::Deserializer<'de>,
 {
-    //TODO: Revisit when issue is fixed:
+    //TODO(stevenroose) Revisit when issue is fixed:
     // https://github.com/serde-rs/serde/issues/723
 
     let v: Vec<String> = Vec::deserialize(deserializer)?;

@@ -3,6 +3,7 @@
 #![allow(clippy::type_complexity)]
 mod controller;
 pub use controller::*;
+mod boot_nodes;
 mod error;
 pub mod peer;
 

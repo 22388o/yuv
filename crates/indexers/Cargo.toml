@@ -12,12 +12,15 @@ yuv-storage = { path = "../storage" }
 event-bus = { path = "../event-bus" }
 bitcoin-client = { path = "../bitcoin-client", features = ["mocks"] }
 
+flume = { workspace = true }
 eyre = { workspace = true }
-tokio = { workspace = true, features = ["sync", "rt", "time"] }
+tokio = { workspace = true, features = ["sync", "rt", "time", "macros", "rt-multi-thread"] }
 tokio-util = { workspace = true }
 bitcoin = { workspace = true }
 tracing = { workspace = true }
 async-trait = { workspace = true }
+futures = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
 
 [dev-dependencies]
 mockall = "0.12.1"

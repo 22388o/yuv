@@ -174,6 +174,13 @@ where
                         self.user_outpoints.insert(outpoint, output_proof.clone());
                     }
                 }
+                PixelProof::EmptyPixel(proof) => {
+                    let (proof_x_only_pubkey, _parity) = proof.inner_key.x_only_public_key();
+
+                    if proof_x_only_pubkey == self_x_only_pubkey {
+                        self.user_outpoints.insert(outpoint, output_proof.clone());
+                    }
+                }
             }
 
             self.indexed_txs.entry(outpoint).or_insert(false);
@@ -201,7 +208,7 @@ where
                 .await?;
 
             if is_outpoint_frozen {
-                self.txs_storage.delete_yuv_tx(outpoint.txid).await?;
+                self.txs_storage.delete_yuv_tx(&outpoint.txid).await?;
                 continue;
             }
 

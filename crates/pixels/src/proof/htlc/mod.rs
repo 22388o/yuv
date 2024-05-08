@@ -29,7 +29,6 @@ pub struct LightningHtlcProof {
     /// Pixel that is locked by HTLC.
     pub pixel: Pixel,
 
-    #[cfg_attr(feature = "serde", serde(flatten))]
     pub data: LightningHtlcData,
 }
 

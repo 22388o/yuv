@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::{
     cli::{arguments, node::Node},
     config::NodeConfig,
@@ -33,8 +35,15 @@ pub async fn run(args: arguments::Run) -> eyre::Result<()> {
     // Start all main components, but do not start external services
     // like RPC, p2p until indexer will be initialized.
 
-    let node = Node::new(config).await?;
-    node.run().await?;
+    let node = Arc::new(Node::new(config).await?);
+    let node_clone = node.clone();
+
+    tokio::spawn(async move {
+        if let Err(err) = node_clone.run().await {
+            tracing::error!("Node cancelled: {:?}", err);
+        }
+        node_clone.task_tracker.close();
+    });
 
     tokio::signal::ctrl_c().await?;
 

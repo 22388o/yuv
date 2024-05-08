@@ -7,7 +7,8 @@ use bitcoin::{self, Transaction, TxIn, TxOut};
 #[cfg(feature = "bulletproof")]
 use yuv_pixels::k256::elliptic_curve::group::GroupEncoding;
 use yuv_pixels::{CheckableProof, Chroma, P2WPKHWintessData, PixelProof};
-use yuv_types::ProofMap;
+use yuv_types::announcements::IssueAnnouncement;
+use yuv_types::{AnyAnnouncement, ProofMap};
 use yuv_types::{YuvTransaction, YuvTxType};
 
 use crate::errors::CheckError;
@@ -15,32 +16,50 @@ use crate::errors::CheckError;
 /// Checks transactions' correctness in terms of conservation rules and provided proofs.
 pub fn check_transaction(yuv_tx: &YuvTransaction) -> Result<(), CheckError> {
     match &yuv_tx.tx_type {
-        YuvTxType::Issue { output_proofs } => check_issue(&yuv_tx.bitcoin_tx, output_proofs),
+        YuvTxType::Issue {
+            output_proofs,
+            announcement,
+        } => check_issue(&yuv_tx.bitcoin_tx, output_proofs, announcement),
         YuvTxType::Transfer {
             input_proofs,
             output_proofs,
         } => check_transfer(&yuv_tx.bitcoin_tx, input_proofs, output_proofs),
         // To check transaction's correctness we need to have list of transactions that are frozen.
         // That's why we skip it on this step.
-        YuvTxType::FreezeToggle { .. } => Ok(()),
+        YuvTxType::Announcement(_) => Ok(()),
     }
 }
 
-pub(crate) fn check_issue(tx: &Transaction, outputs: &ProofMap) -> Result<(), CheckError> {
-    if !check_same_chroma_proofs(&outputs.values().collect::<Vec<_>>()) {
-        return Err(CheckError::NotSameChroma);
-    }
+pub(crate) fn check_issue(
+    tx: &Transaction,
+    output_proofs_opt: &Option<ProofMap>,
+    announcement: &IssueAnnouncement,
+) -> Result<(), CheckError> {
+    let Some(output_proofs) = output_proofs_opt else {
+        return Err(CheckError::NotEnoughProofs {
+            provided: 0,
+            required: tx.output.len(),
+        });
+    };
 
-    let gathered_outputs = extract_from_iterable_by_proof_map(outputs, &tx.output)?;
+    let announced_amount = check_issue_announcement(tx, announcement)?;
+    check_number_of_proofs(tx, output_proofs)?;
+    check_same_chroma_proofs(&output_proofs.values().collect::<Vec<_>>())?;
+
+    let gathered_outputs = extract_from_iterable_by_proof_map(output_proofs, &tx.output)?;
 
     for ProofForCheck {
         inner,
         vout,
-        statement: txout,
+        statement,
     } in gathered_outputs.iter()
     {
+        if statement.script_pubkey.is_op_return() {
+            continue;
+        }
+
         inner
-            .checked_check_by_output(txout)
+            .checked_check_by_output(statement)
             .map_err(|error| CheckError::InvalidProof {
                 proof: Box::new((*inner).clone()),
                 vout: *vout,
@@ -48,9 +67,38 @@ pub(crate) fn check_issue(tx: &Transaction, outputs: &ProofMap) -> Result<(), Ch
             })?;
     }
 
+    let total_amount = output_proofs
+        .values()
+        .map(|proof| proof.pixel().luma.amount)
+        .sum::<u128>();
+
+    if total_amount != announced_amount {
+        return Err(CheckError::AnnouncedAmountDoesNotMatch(
+            announced_amount,
+            total_amount,
+        ));
+    }
+
     check_issue_conservation_rules(&gathered_outputs, tx)?;
 
     Ok(())
+}
+
+fn check_issue_announcement(
+    bitcoin_tx: &Transaction,
+    provided_announcement: &IssueAnnouncement,
+) -> Result<u128, CheckError> {
+    for output in bitcoin_tx.output.iter() {
+        if let Ok(found_announcement) = IssueAnnouncement::from_script(&output.script_pubkey) {
+            if found_announcement.ne(provided_announcement) {
+                return Err(CheckError::IssueAnnouncementMismatch);
+            }
+
+            return Ok(found_announcement.amount);
+        }
+    }
+
+    Ok(0)
 }
 
 pub(crate) fn check_transfer(
@@ -58,10 +106,7 @@ pub(crate) fn check_transfer(
     inputs: &ProofMap,
     outputs: &ProofMap,
 ) -> Result<(), CheckError> {
-    check_tx_same_chroma(
-        &inputs.values().collect::<Vec<_>>(),
-        &outputs.values().collect::<Vec<_>>(),
-    )?;
+    check_number_of_proofs(tx, outputs)?;
 
     let gathered_inputs = extract_from_iterable_by_proof_map(inputs, &tx.input)?;
     let gathered_outputs = extract_from_iterable_by_proof_map(outputs, &tx.output)?;
@@ -107,24 +152,22 @@ pub(crate) fn check_transfer(
     Ok(())
 }
 
-/// Check that all proofs for transaction has the same chroma.
-fn check_tx_same_chroma(
-    input_proofs: &[&PixelProof],
-    output_proofs: &[&PixelProof],
-) -> Result<(), CheckError> {
-    let first_input = input_proofs
-        .first()
-        .ok_or_else(|| CheckError::EmptyInputs)?;
-
-    let Some(first_output) = output_proofs.first() else {
-        return Err(CheckError::EmptyOutputs);
-    };
-
-    if first_input.pixel().chroma != first_output.pixel().chroma {
-        return Err(CheckError::NotSameChroma);
+fn check_number_of_proofs(bitcoin_tx: &Transaction, proofs: &ProofMap) -> Result<(), CheckError> {
+    if bitcoin_tx
+        .output
+        .iter()
+        .filter(|proof| !proof.script_pubkey.is_op_return())
+        .collect::<Vec<&TxOut>>()
+        .len()
+        == proofs.len()
+    {
+        Ok(())
+    } else {
+        Err(CheckError::NotEnoughProofs {
+            provided: proofs.len(),
+            required: bitcoin_tx.output.len(),
+        })
     }
-
-    Ok(())
 }
 
 pub(crate) struct ProofForCheck<'b, T> {
@@ -174,7 +217,7 @@ pub(crate) fn check_transfer_conservation_rules(
     outputs: &[ProofForCheck<&TxOut>],
 ) -> Result<(), CheckError> {
     let input_chromas = sum_amount_by_chroma(inputs);
-    let output_chromas: HashMap<Chroma, u64> = sum_amount_by_chroma(outputs);
+    let output_chromas = sum_amount_by_chroma(outputs);
 
     if input_chromas != output_chromas {
         return Err(CheckError::ConservationRulesViolated);
@@ -183,10 +226,14 @@ pub(crate) fn check_transfer_conservation_rules(
     Ok(())
 }
 
-fn sum_amount_by_chroma<T>(proofs: &[ProofForCheck<T>]) -> HashMap<Chroma, u64> {
-    let mut chromas: HashMap<Chroma, u64> = HashMap::new();
+fn sum_amount_by_chroma<T>(proofs: &[ProofForCheck<T>]) -> HashMap<Chroma, u128> {
+    let mut chromas: HashMap<Chroma, u128> = HashMap::new();
 
     for proof in proofs {
+        if proof.inner.is_empty_pixelproof() {
+            continue;
+        }
+
         let pixel = proof.inner.pixel();
 
         let chroma_sum = chromas.entry(pixel.chroma).or_insert(0);
@@ -196,7 +243,8 @@ fn sum_amount_by_chroma<T>(proofs: &[ProofForCheck<T>]) -> HashMap<Chroma, u64> 
     chromas
 }
 
-/// Check that proofs of the issuance do not violate conservation rules (that chroma (asset type) equals to issuer public key)
+/// Check that proofs of the issuance do not violate conservation rules (that chroma (asset type)
+/// equals to issuer public key)
 pub(crate) fn check_issue_conservation_rules(
     outputs: &[ProofForCheck<&TxOut>],
     tx: &Transaction,
@@ -218,18 +266,26 @@ pub(crate) fn check_issue_conservation_rules(
     Ok(())
 }
 
-/// Check that all proofs has the same chroma, assuming that all proofs are valid.
-///
-/// It is needed only for single-chroma transactions, in future when multi-chroma transactions will be
-/// supported, it can be removed.
-fn check_same_chroma_proofs(proofs: &[&PixelProof]) -> bool {
-    proofs.windows(2).all(|w| {
-        let [previous, next] = w else {
-            panic!("Windows method is set to 2");
-        };
+/// Check that all the proofs have the same chroma, assuming that all proofs are valid.
+fn check_same_chroma_proofs(proofs: &[&PixelProof]) -> Result<(), CheckError> {
+    let filtered_proofs = proofs
+        .iter()
+        .filter(|proof| !proof.is_empty_pixelproof())
+        .copied()
+        .collect::<Vec<&PixelProof>>();
 
-        previous.pixel().chroma == next.pixel().chroma
-    })
+    let Some(first_proof) = filtered_proofs.first() else {
+        return Ok(());
+    };
+
+    if filtered_proofs
+        .iter()
+        .all(|proof| proof.pixel().chroma == first_proof.pixel().chroma)
+    {
+        Ok(())
+    } else {
+        Err(CheckError::NotSameChroma)
+    }
 }
 
 /// Find issuer of the transaction in the inputs by chroma.
@@ -252,6 +308,10 @@ pub(crate) fn find_issuer_in_txinputs<'a>(inputs: &'a [TxIn], chroma: &Chroma) -
 fn is_bulletproof(inputs: &ProofMap, outputs: &ProofMap) -> Result<bool, CheckError> {
     let mut was_found = false;
     for proof in inputs.values().chain(outputs.values()) {
+        if proof.is_empty_pixelproof() {
+            continue;
+        }
+
         let is_bulletproof = proof.is_bulletproof();
 
         if was_found && !is_bulletproof {
@@ -274,6 +334,7 @@ fn are_commitments_equal(
     let (owners, commits): (Vec<_>, Vec<_>) = inputs_proofs
         .iter()
         .chain(outputs_proofs.iter())
+        .filter(|(_, proof)| !proof.is_empty_pixelproof())
         .map(|(_, proof)| {
             let proof = proof
                 .get_bulletproof()

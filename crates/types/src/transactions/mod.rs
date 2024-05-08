@@ -1,13 +1,7 @@
-use crate::FreezeTxToggle;
 use bitcoin::Transaction;
-use yuv_pixels::PixelProof;
 
-use alloc::collections::BTreeMap;
-use alloc::vec::Vec;
-
-mod errors;
-pub(crate) mod state;
-pub(crate) mod toggle;
+use crate::announcements::{Announcement, IssueAnnouncement};
+use crate::ProofMap;
 
 /// Represents entries of the YUV transaction inside the node's storage and
 /// P2P communication inventory
@@ -19,12 +13,11 @@ pub struct YuvTransaction {
 }
 
 impl YuvTransaction {
-    /// Create [`YuvTransaction`] with [`YuvTxType::FreezeToggle`] type for the
-    /// given freezes and bitcoin transaction
-    pub fn freeze_toggles(freezes: Vec<FreezeTxToggle>, bitcoin_tx: Transaction) -> Self {
+    /// Create a new YUV transaction.
+    pub fn new(bitcoin_tx: Transaction, tx_type: YuvTxType) -> Self {
         Self {
             bitcoin_tx,
-            tx_type: YuvTxType::FreezeToggle { freezes },
+            tx_type,
         }
     }
 }
@@ -34,29 +27,28 @@ impl YuvTransaction {
 #[cfg_attr(feature = "serde", serde(tag = "type", content = "data"))]
 pub enum YuvTxType {
     Issue {
-        output_proofs: BTreeMap<u32, PixelProof>,
+        output_proofs: Option<ProofMap>,
+        announcement: IssueAnnouncement,
     },
     Transfer {
-        input_proofs: BTreeMap<u32, PixelProof>,
-        output_proofs: BTreeMap<u32, PixelProof>,
+        input_proofs: ProofMap,
+        output_proofs: ProofMap,
     },
-    FreezeToggle {
-        freezes: Vec<FreezeTxToggle>,
-    },
+    Announcement(Announcement),
 }
 
 impl YuvTxType {
     /// Return output proofs if possible
-    pub fn output_proofs(&self) -> Option<&BTreeMap<u32, PixelProof>> {
+    pub fn output_proofs(&self) -> Option<&ProofMap> {
         match self {
-            Self::Issue { output_proofs } => Some(output_proofs),
+            Self::Issue { output_proofs, .. } => output_proofs.as_ref(),
             Self::Transfer { output_proofs, .. } => Some(output_proofs),
             _ => None,
         }
     }
 
     /// Return input proofs if possible
-    pub fn input_proofs(&self) -> Option<&BTreeMap<u32, PixelProof>> {
+    pub fn input_proofs(&self) -> Option<&ProofMap> {
         match self {
             Self::Transfer { input_proofs, .. } => Some(input_proofs),
             _ => None,
@@ -66,26 +58,15 @@ impl YuvTxType {
 
 impl Default for YuvTxType {
     fn default() -> Self {
-        Self::Issue {
+        Self::Transfer {
             output_proofs: Default::default(),
+            input_proofs: Default::default(),
         }
     }
 }
 
-#[cfg(feature = "serde")]
-impl TryFrom<YuvTransaction> for Vec<u8> {
-    type Error = serde_cbor::Error;
-
-    fn try_from(value: YuvTransaction) -> Result<Self, Self::Error> {
-        serde_cbor::to_vec(&value)
-    }
-}
-
-#[cfg(feature = "serde")]
-impl TryFrom<Vec<u8>> for YuvTransaction {
-    type Error = serde_cbor::Error;
-
-    fn try_from(value: Vec<u8>) -> Result<Self, Self::Error> {
-        serde_cbor::from_slice(&value)
+impl From<Announcement> for YuvTxType {
+    fn from(value: Announcement) -> Self {
+        Self::Announcement(value)
     }
 }

@@ -13,7 +13,7 @@ const DEFAULT_SATOSHIS: u64 = 1000;
 pub struct TransferArgs {
     /// Amount to send.
     #[clap(long, short, num_args = 1..)]
-    pub amount: Vec<u64>,
+    pub amount: Vec<u128>,
 
     /// Satoshis to spend. Specify it either once to override the default,
     /// or per chroma to use a different number of satoshis in each output.
@@ -21,21 +21,25 @@ pub struct TransferArgs {
     pub satoshis: Vec<u64>,
 
     /// Type of the token, public key of the issuer.
-    #[clap(long, short, num_args = 1..)]
-    #[arg(value_parser = Chroma::from_address)]
+    #[clap(long, short, num_args = 1.., value_parser = Chroma::from_address)]
     pub chroma: Vec<Chroma>,
 
     /// The public key of the receiver.
-    #[clap(long, short, num_args = 1..)]
-    #[arg(value_parser = Chroma::from_address)]
+    #[clap(long, short, num_args = 1.., value_parser = Chroma::from_address)]
     pub recipient: Vec<Chroma>,
 
     /// Provide proof of the transaction to YUV node or not.
     #[clap(long)]
     pub do_not_provide_proofs: bool,
+
+    /// Drain tweaked satoshis to use for fees, instead of using regular satoshis.
+    ///
+    /// It's worth noting that change from regular satoshis will be tweaked.
+    #[clap(long)]
+    pub drain_tweaked_satoshis: bool,
 }
 
-// TODO: refactor this
+// TODO: refactor this, please...
 pub async fn run(
     TransferArgs {
         amount,
@@ -43,6 +47,7 @@ pub async fn run(
         chroma,
         recipient,
         do_not_provide_proofs,
+        drain_tweaked_satoshis,
     }: TransferArgs,
     mut ctx: Context,
 ) -> eyre::Result<()> {
@@ -66,7 +71,9 @@ pub async fn run(
             );
         }
 
-        builder.set_fee_rate_strategy(cfg.fee_rate_strategy);
+        builder
+            .set_fee_rate_strategy(cfg.fee_rate_strategy)
+            .set_drain_tweaked_satoshis(drain_tweaked_satoshis);
 
         builder.finish(&blockchain).await?
     };
@@ -76,7 +83,7 @@ pub async fn run(
     } else {
         let client = ctx.yuv_client()?;
 
-        client.send_raw_yuv_tx(tx.clone()).await?;
+        client.send_raw_yuv_tx(tx.clone(), None).await?;
     }
 
     println!("tx id: {}", tx.bitcoin_tx.txid());
@@ -86,7 +93,10 @@ pub async fn run(
     Ok(())
 }
 
-fn process_satoshis(satoshis: Vec<u64>, required_length: usize) -> eyre::Result<Vec<u64>> {
+pub(crate) fn process_satoshis(
+    satoshis: Vec<u64>,
+    required_length: usize,
+) -> eyre::Result<Vec<u64>> {
     match satoshis.len() {
         len if len == required_length => Ok(satoshis),
         1 => Ok(vec![satoshis[0]; required_length]),

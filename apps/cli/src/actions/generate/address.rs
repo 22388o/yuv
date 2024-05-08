@@ -11,7 +11,7 @@ pub struct GenerateAddressArgs {
     pub pubkey: PublicKey,
     /// Amount of tokens to send.
     #[clap(long)]
-    pub amount: u64,
+    pub amount: u128,
     /// Chroma of the pixel.
     #[clap(long)]
     pub chroma: PublicKey,

@@ -16,7 +16,7 @@ services:
     entrypoint:
         - "sh"
         - "-c"
-        - "bitcoind & chmod +x ./faucet.sh && ./faucet.sh"
+        - "bitcoind"
     ports:
       - 18443:18443
       - 18444:18444
@@ -67,6 +67,8 @@ services:
       - 30000:30000
     volumes:
       - ./volumes.dev/bitcoind/:/config
+    profiles:
+      - end_to_end
     restart: on-failure
 
   electrs2:

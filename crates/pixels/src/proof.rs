@@ -14,14 +14,17 @@ use bitcoin::{
 
 #[cfg(feature = "bulletproof")]
 use bulletproof::{
-    k256::{elliptic_curve::sec1::FromEncodedPoint, EncodedPoint, ProjectivePoint},
+    k256::{EncodedPoint, ProjectivePoint},
     RangeProof,
 };
 
+#[cfg(all(feature = "bulletproof", feature = "serde"))]
+use bulletproof::k256::elliptic_curve::sec1::FromEncodedPoint;
+
 use crate::errors::{
-    LightningCommitmentProofError, LightningCommitmentWitnessParseError, MultisigPixelProofError,
-    MultisigWitnessParseError, P2WPKHWitnessParseError, PixelKeyError, PixelProofError,
-    SigPixelProofError,
+    EmptyPixelProofError, LightningCommitmentProofError, LightningCommitmentWitnessParseError,
+    MultisigPixelProofError, MultisigWitnessParseError, P2WPKHWitnessParseError, PixelKeyError,
+    PixelProofError, SigPixelProofError,
 };
 use crate::script::ToLocalScript;
 use crate::{Pixel, PixelKey};
@@ -35,6 +38,11 @@ pub mod htlc;
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(tag = "type", content = "data"))]
 pub enum PixelProof {
+    /// The proof of ownership of the satoshis only output.
+    ///
+    /// This type of proof doesn't hold a pixel.
+    EmptyPixel(EmptyPixelProof),
+
     /// The proof of ownership with single signature.
     Sig(SigPixelProof),
 
@@ -57,14 +65,15 @@ pub enum PixelProof {
 
 impl PixelProof {
     #[inline]
-    pub fn pixel(&self) -> &Pixel {
+    pub fn pixel(&self) -> Pixel {
         match self {
-            Self::Sig(sig_proof) => &sig_proof.pixel,
-            Self::Multisig(multisig_proof) => &multisig_proof.pixel,
-            Self::Lightning(lightning_proof) => &lightning_proof.pixel,
+            Self::Sig(sig_proof) => sig_proof.pixel,
+            Self::Multisig(multisig_proof) => multisig_proof.pixel,
+            Self::Lightning(lightning_proof) => lightning_proof.pixel,
             #[cfg(feature = "bulletproof")]
-            Self::Bulletproof(bulletproof) => &bulletproof.pixel,
-            Self::LightningHtlc(htlc) => &htlc.pixel,
+            Self::Bulletproof(bulletproof) => bulletproof.pixel,
+            Self::LightningHtlc(htlc) => htlc.pixel,
+            Self::EmptyPixel(_) => Pixel::empty(),
         }
     }
 
@@ -78,6 +87,20 @@ impl PixelProof {
 
     pub fn lightning_htlc(pixel: impl Into<Pixel>, data: LightningHtlcData) -> Self {
         Self::LightningHtlc(LightningHtlcProof::new(pixel.into(), data))
+    }
+
+    pub fn lightning(
+        pixel: impl Into<Pixel>,
+        revocation_pubkey: PublicKey,
+        to_self_delay: u16,
+        local_delayed_pubkey: PublicKey,
+    ) -> Self {
+        Self::Lightning(LightningCommitmentProof::new(
+            pixel.into(),
+            revocation_pubkey,
+            to_self_delay,
+            local_delayed_pubkey,
+        ))
     }
 
     #[cfg(feature = "bulletproof")]
@@ -100,6 +123,10 @@ impl PixelProof {
     #[cfg(feature = "bulletproof")]
     pub fn is_bulletproof(&self) -> bool {
         matches!(self, Self::Bulletproof(_))
+    }
+
+    pub fn is_empty_pixelproof(&self) -> bool {
+        matches!(self, Self::EmptyPixel(_))
     }
 
     #[cfg(feature = "bulletproof")]
@@ -144,6 +171,7 @@ impl CheckableProof for PixelProof {
             #[cfg(feature = "bulletproof")]
             Self::Bulletproof(bulletproof) => bulletproof.checked_check_by_input(txin)?,
             Self::LightningHtlc(htlc) => htlc.checked_check_by_input(txin)?,
+            Self::EmptyPixel(empty_pixelproof) => empty_pixelproof.checked_check_by_input(txin)?,
         };
 
         Ok(())
@@ -157,6 +185,9 @@ impl CheckableProof for PixelProof {
             #[cfg(feature = "bulletproof")]
             Self::Bulletproof(bulletproof) => bulletproof.checked_check_by_output(txout)?,
             Self::LightningHtlc(htlc) => htlc.checked_check_by_output(txout)?,
+            Self::EmptyPixel(empty_pixelproof) => {
+                empty_pixelproof.checked_check_by_output(txout)?
+            }
         };
 
         Ok(())
@@ -339,6 +370,75 @@ impl CheckableProof for Bulletproof {
 
         if !bulletproof::verify(self.commitment, self.proof.clone()) {
             return Err(BulletproofError::InvalidRangeProof);
+        }
+
+        Ok(())
+    }
+}
+
+/// The proof of ownership of the change output.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct EmptyPixelProof {
+    /// Key of current owner of the pixel.
+    pub inner_key: secp256k1::PublicKey,
+}
+
+impl EmptyPixelProof {
+    pub fn new(inner_key: secp256k1::PublicKey) -> Self {
+        Self { inner_key }
+    }
+
+    pub(crate) fn check_by_parsed_witness_data(
+        &self,
+        pubkey: &PublicKey,
+    ) -> Result<(), EmptyPixelProofError> {
+        let pixel_key = PixelKey::new(Pixel::empty(), &self.inner_key)?;
+
+        if pixel_key.0 != *pubkey {
+            return Err(EmptyPixelProofError::InvalidWitnessPublicKey(
+                (*pubkey).into(),
+                pixel_key.0.into(),
+            ));
+        }
+
+        Ok(())
+    }
+}
+
+impl From<EmptyPixelProof> for PixelProof {
+    fn from(value: EmptyPixelProof) -> Self {
+        Self::EmptyPixel(value)
+    }
+}
+
+impl CheckableProof for EmptyPixelProof {
+    type Error = EmptyPixelProofError;
+
+    /// Get from input witness signature and public key and check that public
+    /// key is equal to the tweaked one from proof.
+    fn checked_check_by_input(&self, txin: &TxIn) -> Result<(), Self::Error> {
+        let data = P2WPKHWintessData::from_witness(&txin.witness)?;
+
+        self.check_by_parsed_witness_data(&data.pubkey)?;
+
+        Ok(())
+    }
+
+    /// Get from transaction output `script_pubkey` and create P2WPKH script
+    /// from tweaked public key from proof and compare it with `script_pubkey`.
+    fn checked_check_by_output(&self, txout: &TxOut) -> Result<(), Self::Error> {
+        let pixel_key = PixelKey::new(Pixel::empty(), &self.inner_key)?;
+
+        let expected_script_pubkey = pixel_key
+            .to_p2wpkh()
+            .ok_or(PixelKeyError::UncompressedKey)?;
+
+        if txout.script_pubkey != expected_script_pubkey {
+            return Err(EmptyPixelProofError::InvalidScript(
+                txout.script_pubkey.clone(),
+                expected_script_pubkey,
+            ));
         }
 
         Ok(())
@@ -798,6 +898,20 @@ impl CheckableProof for LightningCommitmentProof {
 }
 
 impl LightningCommitmentProof {
+    pub fn new(
+        pixel: Pixel,
+        revocation_pubkey: PublicKey,
+        to_self_delay: u16,
+        local_delayed_pubkey: PublicKey,
+    ) -> Self {
+        Self {
+            pixel,
+            revocation_pubkey: revocation_pubkey.inner,
+            to_self_delay,
+            local_delayed_pubkey: local_delayed_pubkey.inner,
+        }
+    }
+
     /// Tweak revocation pubkey and convert with other data to redeem script.
     pub fn to_redeem_script(&self) -> Result<ToLocalScript, LightningCommitmentProofError> {
         let tweaked_revocation_key = PixelKey::new(self.pixel, &self.revocation_pubkey)?;

@@ -4,12 +4,13 @@ use bitcoin::PublicKey;
 use clap::Args;
 use color_eyre::eyre::{self, bail};
 use yuv_pixels::{Chroma, Pixel, PixelProof};
-use yuv_types::Proofs;
+use yuv_types::TransferProofs;
 
 #[derive(Debug, Args)]
 pub struct ProofListArgs {
     /// Chroma of the pixel.
     #[clap(long)]
+    #[arg(value_parser = Chroma::from_address)]
     pub chroma: Chroma,
 
     /// Number of the input in transaction.
@@ -26,11 +27,11 @@ pub struct ProofListArgs {
 
     /// Amount of the token
     #[clap(long, num_args = 1..)]
-    pub amount: Vec<u64>,
+    pub amount: Vec<u128>,
 }
 
 impl ProofListArgs {
-    pub(crate) fn into_proof_maps(self) -> eyre::Result<Proofs> {
+    pub(crate) fn into_proof_maps(self) -> eyre::Result<TransferProofs> {
         let inputs_number = self.vin.len();
         let outputs_number = self.vout.len();
 
@@ -72,7 +73,7 @@ impl ProofListArgs {
             })
             .collect::<BTreeMap<_, _>>();
 
-        Ok(Proofs {
+        Ok(TransferProofs {
             input: inputs,
             output: outputs,
         })

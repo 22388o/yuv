@@ -24,7 +24,7 @@ tracing = { workspace = true }
 bitcoin = { workspace = true, features = ["serde", "base64", "rand"] }
 jsonrpsee = { workspace = true }
 futures = { workspace = true }
-serde_cbor = { workspace = true }
+ciborium = { workspace = true }
 
 [dev-dependencies]
 once_cell = { version = "1.18.0" }

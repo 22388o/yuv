@@ -11,7 +11,7 @@ use crate::context::Context;
 pub struct CheckArgs {
     /// Value to check
     #[clap(long)]
-    pub value: u64,
+    pub value: u128,
 
     #[clap(long)]
     pub tx_id: Txid,
@@ -20,8 +20,7 @@ pub struct CheckArgs {
     pub tx_vout: u32,
 
     /// Sender public key
-    #[clap(long)]
-    #[arg(value_parser = Chroma::from_address)]
+    #[clap(long, value_parser = Chroma::from_address)]
     pub sender: Chroma,
 }
 

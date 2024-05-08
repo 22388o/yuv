@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 
 use bdk::{
     miniscript::ToPublicKey,
@@ -13,11 +13,9 @@ use bitcoin::{
 use eyre::bail;
 use yuv_pixels::{
     LightningCommitmentProof, LightningCommitmentWitness, MultisigPixelProof, MultisigWintessData,
-    P2WPKHWintessData, Pixel, PixelPrivateKey, PixelProof, SigPixelProof,
+    P2WPKHWintessData, Pixel, PixelPrivateKey, PixelProof,
 };
-
-#[cfg(feature = "bulletproof")]
-use yuv_pixels::Bulletproof;
+use yuv_types::ProofMap;
 
 pub struct TransactionSigner {
     /// Secp256k1 engine is used to execute all signature operations.
@@ -46,12 +44,12 @@ impl TransactionSigner {
     pub fn sign(
         self,
         psbt: &mut PartiallySignedTransaction,
-        input_proofs: &BTreeMap<u32, PixelProof>,
+        input_proofs: &ProofMap,
     ) -> Result<(), eyre::ErrReport> {
         for (index, proof) in input_proofs {
             match &proof {
                 PixelProof::Sig(sigproof) => {
-                    self.sign_sigproof_input(sigproof, psbt, *index)?;
+                    self.sign_input(sigproof.pixel, &sigproof.inner_key, psbt, *index)?;
                 }
                 PixelProof::Multisig(multisig_proof) => {
                     self.sign_multiproof_input(multisig_proof, psbt, *index)?;
@@ -61,7 +59,7 @@ impl TransactionSigner {
                 }
                 #[cfg(feature = "bulletproof")]
                 PixelProof::Bulletproof(proof) => {
-                    self.sign_bulletproof_input(proof.clone().as_ref().clone(), psbt, *index)?;
+                    self.sign_input(proof.pixel, &proof.inner_key, psbt, *index)?;
                 }
                 PixelProof::LightningHtlc(_htlc_proof) => {
                     bail!(
@@ -69,21 +67,13 @@ impl TransactionSigner {
                         spend it, as it has all required information and keys."#
                     )
                 }
+                PixelProof::EmptyPixel(proof) => {
+                    self.sign_input(Pixel::empty(), &proof.inner_key, psbt, *index)?;
+                }
             };
         }
 
         Ok(())
-    }
-
-    /// Add witness (signature, pubkey) for pixel P2WPKH input with tweaked by
-    /// pixel key.
-    fn sign_sigproof_input(
-        &self,
-        SigPixelProof { pixel, inner_key }: &SigPixelProof,
-        psbt: &mut PartiallySignedTransaction,
-        index: u32,
-    ) -> Result<(), eyre::ErrReport> {
-        self.sign_input(*pixel, inner_key, psbt, index)
     }
 
     /// Add witness (signatures, redeem script) for pixel multisig P2WSH input
@@ -195,16 +185,6 @@ impl TransactionSigner {
         signed_input.final_script_witness = Some(witness.into());
 
         Ok(())
-    }
-
-    #[cfg(feature = "bulletproof")]
-    fn sign_bulletproof_input(
-        &self,
-        proof: Bulletproof,
-        psbt: &mut PartiallySignedTransaction,
-        index: u32,
-    ) -> Result<(), eyre::ErrReport> {
-        self.sign_input(proof.pixel, &proof.inner_key, psbt, index)
     }
 
     fn sign_input(

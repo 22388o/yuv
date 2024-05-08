@@ -23,8 +23,8 @@ max_items_per_request = 1 # items limitation in the list requests
 
 [storage]
 path = "./.yuvd/node-1" # path to directory with stored txs.
-create_if_missing = true
-tx_per_page = 100
+create_if_missing = true # Create database if missing with all missing directories in path
+tx_per_page = 100 # Number of transactions per one page return by `getlistrawyuvtransactions`
 flush_period = 100 # responds for the saving data period (in sececonds) 
 
 [checkers]
@@ -38,9 +38,18 @@ auth = { username = "admin1", password = "123" } # bitcoin node auth
 level = "INFO" # level logging, accepting values: TRACE, DEBUG, INFO, WARN, ERROR
 
 [indexer]
+# Number of blocks to index again (subtract from height of last indexed block).
+index_step_back = 1
+# blockhash from which the indexer indexes blocks
+starting_block = "000000000000000000027e245190ea0b27c4eb344618816fbdd8b5eec8e234d3"
 polling_period = { secs = 5, nanos = 0 } # interval between indexer runs
 # max time after each transaction should be discarded from pool
 max_confirmation_time = { secs = 86400, nanos = 0 } 
+blockloader = { 
+    workers_number = 10, # number of workers which load blocks
+    buffer_size = 50, # Number of blocks that will be fetched by the block loader in each iteration
+    worker_time_sleep = 3 # Sleep the worker for seconds when the worker exceeds the rate limit
+}
 
 [controller]
 max_inv_size = 100 # max number of txs in inv message

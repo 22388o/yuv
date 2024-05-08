@@ -28,6 +28,8 @@ use crate::{
     net::{NetReactor, NetWaker},
 };
 
+use super::boot_nodes::insert_boot_nodes;
+
 /// P2P client configuration.
 #[derive(Debug, Clone)]
 pub struct P2PConfig {
@@ -103,6 +105,8 @@ impl<R: NetReactor> P2PClient<R> {
         let rng = fastrand::Rng::new();
 
         let mut peers = Cache::new();
+
+        insert_boot_nodes(&mut peers, config.network);
 
         for addr in &config.connect {
             peers.insert(

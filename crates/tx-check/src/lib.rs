@@ -6,9 +6,6 @@ pub use errors::CheckError;
 mod transaction;
 pub use transaction::check_transaction;
 
-mod tx_checker;
-pub use tx_checker::TransactionChecker;
-
 mod worker;
 pub use worker::{Config, TxCheckerWorker};
 

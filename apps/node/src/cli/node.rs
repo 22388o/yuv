@@ -1,17 +1,17 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::config::{NodeConfig, StorageConfig};
 use bitcoin_client::BitcoinRpcClient;
 use event_bus::EventBus;
-use eyre::Context;
+use eyre::{Context, Ok};
 use tokio::select;
 use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
-use tracing::info;
-
+use tracing::{info, warn};
 use yuv_controller::Controller;
-use yuv_indexers::{BitcoinBlockIndexer, ConfirmationIndexer, FreezesIndexer, RunParams};
+use yuv_indexers::{AnnouncementsIndexer, BitcoinBlockIndexer, ConfirmationIndexer, RunParams};
 
 use yuv_p2p::{
     client::{Handle, P2PClient},
@@ -24,8 +24,6 @@ use yuv_tx_check::{Config as CheckerConfig, TxCheckerWorkerPool};
 use yuv_types::{
     ConfirmationIndexerMessage, ControllerMessage, GraphBuilderMessage, TxCheckerMessage,
 };
-
-use crate::config::{NodeConfig, StorageConfig};
 
 const DEFAULT_CHANNEL_SIZE: usize = 1000;
 
@@ -41,7 +39,7 @@ pub struct Node {
     btc_client: Arc<BitcoinRpcClient>,
 
     cancelation: CancellationToken,
-    task_tracker: TaskTracker,
+    pub(crate) task_tracker: TaskTracker,
 }
 
 impl Node {
@@ -165,17 +163,36 @@ impl Node {
         let mut indexer =
             BitcoinBlockIndexer::new(self.btc_client.clone(), self.state_storage.clone());
 
-        indexer.add_indexer(FreezesIndexer::new(&self.event_bus));
+        indexer.add_indexer(AnnouncementsIndexer::new(&self.event_bus));
         indexer.add_indexer(ConfirmationIndexer::new(
             &self.event_bus,
             self.btc_client.clone(),
             self.config.indexer.max_confirmation_time,
         ));
 
-        indexer
-            .init(self.config.indexer.clone().into())
+        let restart_interval = self.config.indexer.restart_interval;
+        let mut current_attempt = 1;
+        while let Err(err) = indexer
+            .init(
+                self.config.indexer.clone().into(),
+                self.config.indexer.blockloader.clone(),
+                self.btc_client.clone(),
+                self.cancelation.clone(),
+            )
             .await
-            .wrap_err("failed to initialize indexer")?;
+        {
+            if current_attempt >= self.config.indexer.max_restart_attempts {
+                return Err(err);
+            }
+
+            current_attempt += 1;
+            warn!(
+                %err,
+                "Failed to init the indexer. Trying again in {} secs",
+                restart_interval.as_secs()
+            );
+            tokio::time::sleep(restart_interval).await;
+        }
 
         self.task_tracker.spawn(indexer.run(
             RunParams {
@@ -242,7 +259,7 @@ impl Node {
             _ = self.task_tracker.wait() => {},
             // Or wait for and exit by timeout
             _ = sleep(Duration::from_secs(timeout)) => {
-                tracing::info!("Shutdown timeout reached, exiting...");
+                info!("Shutdown timeout reached, exiting...");
             },
         }
     }

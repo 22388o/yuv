@@ -9,7 +9,7 @@ pub type ProofMap = BTreeMap<u32, PixelProof>;
 /// Contains proofs for inputs and outputs of the YUV Transaction.
 #[derive(Debug, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct Proofs {
+pub struct TransferProofs {
     #[cfg_attr(feature = "serde", serde(default))]
     pub input: ProofMap,
     pub output: ProofMap,

@@ -340,7 +340,7 @@ impl<Id: PeerId + Send + Sync> Reactor<net::TcpStream, Id> {
             .unwrap_or(WAIT_TIMEOUT)
             .into();
 
-        debug!(
+        trace!(
             "Polling {} source(s) and {} timeout(s), waking up in {:?}..",
             self.sources.len(),
             self.timeouts.len(),

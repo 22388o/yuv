@@ -8,10 +8,10 @@ const PAGES_NUMBER_KEY_SIZE: usize = 12;
 /// The key for the [`KeyValueStorage`] storage where the YUV Node's pages number are stored.
 const PAGES_NUMBER_KEY: &[u8; PAGES_NUMBER_KEY_SIZE] = b"pages-number";
 
-const PAGES_PREFIX_SIZE: usize = 5;
 /// The prefix that is used with the page number to store the page in the
 /// [`KeyValueStorage`]. "page-1", "page-2", etc.
-const PAGES_PREFIX: &[u8; PAGES_PREFIX_SIZE] = b"page-";
+const PAGES_PREFIX: &str = "page-";
+const PAGES_PREFIX_SIZE: usize = PAGES_PREFIX.len();
 
 /// Page key size is 5(`PAGES_PREFIX:[u8; 5]`) + 8(`page number:u64`) = 13 bytes long
 const PAGE_KEY_SIZE: usize = PAGES_PREFIX_SIZE + size_of::<u64>();
@@ -30,7 +30,7 @@ pub trait PagesNumberStorage: KeyValueStorage<[u8; PAGES_NUMBER_KEY_SIZE], u64> 
 fn page_key(page_num: u64) -> [u8; PAGE_KEY_SIZE] {
     let mut bytes = [0u8; PAGE_KEY_SIZE];
 
-    bytes[..PAGES_PREFIX_SIZE].copy_from_slice(PAGES_PREFIX);
+    bytes[..PAGES_PREFIX_SIZE].copy_from_slice(PAGES_PREFIX.as_bytes());
     bytes[PAGES_PREFIX_SIZE..].copy_from_slice(&page_num.to_be_bytes());
 
     bytes

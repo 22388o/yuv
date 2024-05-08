@@ -11,13 +11,17 @@ use crate::errors::{ChromaParseError, LumaParseError, PixelParseError};
 /// The size of the [`Luma`] in bytes.
 pub const LUMA_SIZE: usize = 32;
 
-pub const BLINDING_FACTOR_SIZE: usize = LUMA_SIZE - size_of::<u64>();
+pub const AMOUNT_SIZE: usize = size_of::<u128>();
+
+pub const BLINDING_FACTOR_SIZE: usize = LUMA_SIZE - AMOUNT_SIZE;
 
 /// Size of serialized [`XOnlyPublicKey`] under the hood.
 pub const CHROMA_SIZE: usize = 32;
 
 /// Result size of serialized [`Pixel`].
 pub const PIXEL_SIZE: usize = LUMA_SIZE + CHROMA_SIZE;
+
+const ZERO_PUBKEY_BYTES: &[u8] = &[0x02; 33];
 
 /// Represents amount of tokens in the [`Pixel`].
 ///
@@ -26,7 +30,7 @@ pub const PIXEL_SIZE: usize = LUMA_SIZE + CHROMA_SIZE;
 #[derive(Clone, Debug, Copy, Hash, Default, PartialEq, Eq, Ord, PartialOrd)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Luma {
-    pub amount: u64,
+    pub amount: u128,
 
     #[cfg_attr(
         feature = "serde",
@@ -40,8 +44,8 @@ fn is_default_blinding_factor(blinding_factor: &[u8; BLINDING_FACTOR_SIZE]) -> b
     blinding_factor.iter().all(|&b| b == 0)
 }
 
-impl From<u64> for Luma {
-    fn from(amount: u64) -> Self {
+impl From<u128> for Luma {
+    fn from(amount: u128) -> Self {
         Self {
             amount,
             ..Default::default()
@@ -56,7 +60,7 @@ impl From<[u8; LUMA_SIZE]> for Luma {
 }
 
 impl Luma {
-    pub fn new(amount: u64, blinding_factor: [u8; BLINDING_FACTOR_SIZE]) -> Self {
+    pub fn new(amount: u128, blinding_factor: [u8; BLINDING_FACTOR_SIZE]) -> Self {
         Self {
             amount,
             blinding_factor,
@@ -77,15 +81,15 @@ impl Luma {
 
     pub fn from_array(bytes: [u8; LUMA_SIZE]) -> Self {
         // TODO: check if we want big-endian, or little-endian.
-        let amount = u64::from_be_bytes(
-            bytes[0..8]
+        let amount = u128::from_be_bytes(
+            bytes[0..AMOUNT_SIZE]
                 .try_into()
-                .expect("Converting [u8; 32] to [u8; 8] should always success"),
+                .expect("Converting [u8; 32] to [u8; 16] should always success"),
         );
 
-        let blinding_factor = bytes[8..]
+        let blinding_factor = bytes[AMOUNT_SIZE..]
             .try_into()
-            .expect("Converting [u8; 32] to [u8; 24] should always success");
+            .expect("Converting [u8; 32] to [u8; 16] should always success");
 
         Self {
             amount,
@@ -94,11 +98,11 @@ impl Luma {
     }
 
     pub fn to_bytes(&self) -> [u8; LUMA_SIZE] {
-        let mut buf: [u8; LUMA_SIZE] = Default::default();
+        let mut buf: [u8; LUMA_SIZE] = [0u8; LUMA_SIZE];
 
         // TODO: check if want to use big-endian or little-endian.
-        buf[..8].copy_from_slice(&self.amount.to_be_bytes());
-        buf[8..].copy_from_slice(&self.blinding_factor);
+        buf[..AMOUNT_SIZE].copy_from_slice(&self.amount.to_be_bytes());
+        buf[AMOUNT_SIZE..].copy_from_slice(&self.blinding_factor);
 
         buf
     }
@@ -235,6 +239,15 @@ impl Pixel {
         Self {
             luma: luma.into(),
             chroma: chroma.into(),
+        }
+    }
+
+    pub fn empty() -> Self {
+        let zero_pubkey = PublicKey::from_slice(ZERO_PUBKEY_BYTES).expect("Pubkey should be valid");
+
+        Self {
+            luma: 0.into(),
+            chroma: zero_pubkey.into(),
         }
     }
 

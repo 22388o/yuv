@@ -17,8 +17,8 @@ pub use keys::{PixelKey, PixelPrivateKey, ToEvenPublicKey};
 pub use pixel::{Chroma, Luma, Pixel, BLINDING_FACTOR_SIZE, CHROMA_SIZE, LUMA_SIZE, PIXEL_SIZE};
 pub use proof::{
     htlc::{HtlcScriptKind, LightningHtlcData, LightningHtlcProof, LightningHtlcScript},
-    CheckableProof, LightningCommitmentProof, LightningCommitmentWitness, MultisigPixelProof,
-    MultisigWintessData, P2WPKHWintessData, PixelProof, SigPixelProof,
+    CheckableProof, EmptyPixelProof, LightningCommitmentProof, LightningCommitmentWitness,
+    MultisigPixelProof, MultisigWintessData, P2WPKHWintessData, PixelProof, SigPixelProof,
 };
 #[cfg(feature = "bulletproof")]
 pub use proof::{Bulletproof, BulletproofError};

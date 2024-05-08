@@ -26,6 +26,7 @@ bitcoin = { workspace = true }
 uuid = { workspace = true }
 
 k256 = { version = "0.13.2", optional = true }
+log = "0.4.21"
 
 [dev-dependencies]
 once_cell = "1.18.0"

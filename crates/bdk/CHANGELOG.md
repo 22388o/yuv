@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- Use `openssl` for `electrum-client` as `rustls` version has vulnerabilities found by `cargo audit`. 
+
 ## [v0.28.2]
 
 ### Summary
