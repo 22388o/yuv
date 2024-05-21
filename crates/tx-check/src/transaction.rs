@@ -1,12 +1,12 @@
 use std::collections::HashMap;
 
-#[cfg(feature = "bulletproof")]
-use bitcoin::secp256k1::Secp256k1;
-use bitcoin::{self, Transaction, TxIn, TxOut};
+use bitcoin::{self, util::key::Secp256k1, Transaction, TxIn, TxOut};
 
 #[cfg(feature = "bulletproof")]
 use yuv_pixels::k256::elliptic_curve::group::GroupEncoding;
-use yuv_pixels::{CheckableProof, Chroma, P2WPKHWintessData, PixelProof};
+use yuv_pixels::{
+    CheckableProof, Chroma, P2WPKHWintessData, Pixel, PixelKey, PixelProof, ToEvenPublicKey,
+};
 use yuv_types::announcements::IssueAnnouncement;
 use yuv_types::{AnyAnnouncement, ProofMap};
 use yuv_types::{YuvTransaction, YuvTxType};
@@ -19,18 +19,18 @@ pub fn check_transaction(yuv_tx: &YuvTransaction) -> Result<(), CheckError> {
         YuvTxType::Issue {
             output_proofs,
             announcement,
-        } => check_issue(&yuv_tx.bitcoin_tx, output_proofs, announcement),
+        } => check_issue_isolated(&yuv_tx.bitcoin_tx, output_proofs, announcement),
         YuvTxType::Transfer {
             input_proofs,
             output_proofs,
-        } => check_transfer(&yuv_tx.bitcoin_tx, input_proofs, output_proofs),
+        } => check_transfer_isolated(&yuv_tx.bitcoin_tx, input_proofs, output_proofs),
         // To check transaction's correctness we need to have list of transactions that are frozen.
         // That's why we skip it on this step.
         YuvTxType::Announcement(_) => Ok(()),
     }
 }
 
-pub(crate) fn check_issue(
+pub(crate) fn check_issue_isolated(
     tx: &Transaction,
     output_proofs_opt: &Option<ProofMap>,
     announcement: &IssueAnnouncement,
@@ -101,7 +101,7 @@ fn check_issue_announcement(
     Ok(0)
 }
 
-pub(crate) fn check_transfer(
+pub(crate) fn check_transfer_isolated(
     tx: &Transaction,
     inputs: &ProofMap,
     outputs: &ProofMap,
@@ -230,11 +230,11 @@ fn sum_amount_by_chroma<T>(proofs: &[ProofForCheck<T>]) -> HashMap<Chroma, u128>
     let mut chromas: HashMap<Chroma, u128> = HashMap::new();
 
     for proof in proofs {
-        if proof.inner.is_empty_pixelproof() {
+        let pixel = proof.inner.pixel();
+
+        if proof.inner.is_empty_pixelproof() || pixel.luma.amount == 0 {
             continue;
         }
-
-        let pixel = proof.inner.pixel();
 
         let chroma_sum = chromas.entry(pixel.chroma).or_insert(0);
         *chroma_sum += pixel.luma.amount;
@@ -290,6 +290,7 @@ fn check_same_chroma_proofs(proofs: &[&PixelProof]) -> Result<(), CheckError> {
 
 /// Find issuer of the transaction in the inputs by chroma.
 pub(crate) fn find_issuer_in_txinputs<'a>(inputs: &'a [TxIn], chroma: &Chroma) -> Option<&'a TxIn> {
+    let ctx = Secp256k1::new();
     inputs.iter().find(|input| {
         // Skip entry if it's not p2wpkh
         //
@@ -299,8 +300,15 @@ pub(crate) fn find_issuer_in_txinputs<'a>(inputs: &'a [TxIn], chroma: &Chroma) -
         };
 
         let (xonly_public_key, _parity) = witness.pubkey.inner.x_only_public_key();
+        // It's also necessary to check if the witness pubkey matches the pixel key made with an empty pixel,
+        // as an issuance transaction can also spend tweaked UTXOs.
+        let (pixel_pubkey, _parity) = PixelKey::new(Pixel::empty(), &chroma.public_key().inner)
+            .expect("Key should tweak")
+            .even_public_key(&ctx)
+            .inner
+            .x_only_public_key();
 
-        &xonly_public_key == chroma.xonly()
+        &xonly_public_key == chroma.xonly() || xonly_public_key == pixel_pubkey
     })
 }
 

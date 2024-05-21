@@ -1,9 +1,7 @@
 use std::{net::SocketAddr, str::FromStr};
 
-use bitcoin::{
-    network::{constants::ServiceFlags, Address},
-    Network,
-};
+use bitcoin::network::{constants::ServiceFlags, Address};
+use yuv_types::network::Network;
 
 use crate::common::peer::{KnownAddress, Source, Store};
 
@@ -11,6 +9,7 @@ use super::peer::Cache;
 
 const TESTNET: &[&str] = &[];
 const MAINNET: &[&str] = &[];
+const MUTINY: &[&str] = &[];
 
 /// Update the list of peers with the hard coded boot nodes for the given [Network].
 pub(crate) fn insert_boot_nodes(peers: &mut Cache, network: Network) {
@@ -22,6 +21,10 @@ pub(crate) fn insert_boot_nodes(peers: &mut Cache, network: Network) {
         Network::Testnet => {
             tracing::debug!("Adding {} testnet boot nodes", TESTNET.len());
             insert(peers, TESTNET)
+        }
+        Network::Mutiny => {
+            tracing::debug!("Adding {} Mutiny boot nodes", MUTINY.len());
+            insert(peers, MUTINY)
         }
         _ => {
             tracing::debug!("No boot nodes provided for the given network");

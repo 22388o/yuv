@@ -1,28 +1,27 @@
 use crate::TxCheckerWorker;
 
 use crate::worker::Config;
-use bitcoin_client::{BitcoinRpcApi, Error as BitcoinRpcError};
+use bitcoin_client::Error as BitcoinRpcError;
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 use yuv_storage::{ChromaInfoStorage, FrozenTxsStorage, InvalidTxsStorage, TransactionsStorage};
 
-pub struct TxCheckerWorkerPool<TransactoinsStorage, StateStorage, BitcoinClient> {
-    workers: Vec<TxCheckerWorker<TransactoinsStorage, StateStorage, BitcoinClient>>,
+pub struct TxCheckerWorkerPool<TransactoinsStorage, StateStorage> {
+    workers: Vec<TxCheckerWorker<TransactoinsStorage, StateStorage>>,
 }
 
-impl<TS, SS, BC> TxCheckerWorkerPool<TS, SS, BC>
+impl<TS, SS> TxCheckerWorkerPool<TS, SS>
 where
     TS: TransactionsStorage + Clone + Send + Sync + 'static,
     SS: InvalidTxsStorage + FrozenTxsStorage + ChromaInfoStorage + Clone + Send + Sync + 'static,
-    BC: BitcoinRpcApi + Send + Sync + 'static,
 {
     pub fn from_config(
         pool_size: usize,
-        worker_config: Config<TS, SS, BC>,
+        worker_config: Config<TS, SS>,
     ) -> Result<Self, BitcoinRpcError> {
         let workers = (0..pool_size)
             .map(|i| TxCheckerWorker::from_config(&worker_config, Some(i)))
-            .collect::<Vec<TxCheckerWorker<TS, SS, BC>>>();
+            .collect::<Vec<TxCheckerWorker<TS, SS>>>();
 
         Ok(Self { workers })
     }

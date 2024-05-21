@@ -42,7 +42,18 @@ pub async fn run(args: arguments::Run) -> eyre::Result<()> {
     let e2e = E2e::new(config.clone()).await?;
     e2e.run().await?;
 
-    tokio::signal::ctrl_c().await?;
+    if let Some(duration) = config.duration {
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => {
+                info!("Cancellation received");
+            }
+            _ = tokio::time::sleep(duration) => {
+                info!("Test duration is reached, exiting");
+            }
+        }
+    } else {
+        tokio::signal::ctrl_c().await?;
+    }
 
     e2e.shutdown().await;
 

@@ -577,7 +577,6 @@ where
         announcement: Announcement,
         fee_rate_strategy: FeeRateStrategy,
         blockchain: &impl Blockchain,
-        satoshis: u64,
     ) -> eyre::Result<YuvTransaction> {
         let tx = {
             let wallet = self.bitcoin_wallet.read().unwrap();
@@ -588,8 +587,9 @@ where
                 .wrap_err("failed to estimate fee")?;
 
             builder
-                .add_recipient(announcement.to_script(), satoshis)
-                .fee_rate(fee_rate);
+                .add_recipient(announcement.to_script(), 0)
+                .fee_rate(fee_rate)
+                .allow_dust(true);
 
             let (mut psbt, _) = builder.finish()?;
 
@@ -607,12 +607,11 @@ where
         outpoint: OutPoint,
         fee_rate_strategy: FeeRateStrategy,
         blockchain: &impl Blockchain,
-        satoshis: u64,
     ) -> eyre::Result<YuvTransaction> {
         let tx_freeze = FreezeAnnouncement::from(outpoint);
 
         let yuv_tx =
-            self.create_announcement_tx(tx_freeze.into(), fee_rate_strategy, blockchain, satoshis)?;
+            self.create_announcement_tx(tx_freeze.into(), fee_rate_strategy, blockchain)?;
 
         Ok(yuv_tx)
     }

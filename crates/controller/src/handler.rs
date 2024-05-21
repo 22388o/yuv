@@ -10,8 +10,9 @@ use tracing::trace;
 use yuv_p2p::client::handle::Handle as ClientHandle;
 use yuv_storage::{InventoryStorage, TransactionsStorage, TxState, TxStatesStorage};
 use yuv_types::{
-    messages::p2p::Inventory, ConfirmationIndexerMessage, ControllerMessage, ControllerP2PMessage,
-    TxCheckerMessage, YuvTransaction,
+    messages::{p2p::Inventory, TxsToConfirm},
+    Announcement, ControllerMessage, ControllerP2PMessage, TxConfirmMessage, YuvTransaction,
+    YuvTxType,
 };
 
 /// Default inventory size.
@@ -65,10 +66,7 @@ where
         p2p_handle: P2P,
     ) -> Self {
         let event_bus = full_event_bus
-            .extract(
-                &typeid![TxCheckerMessage, ConfirmationIndexerMessage],
-                &typeid![ControllerMessage],
-            )
+            .extract(&typeid![TxConfirmMessage], &typeid![ControllerMessage])
             .expect("event channels must be presented");
 
         Self {
@@ -147,18 +145,15 @@ where
                 .wrap_err_with(move || {
                     format!("failed to handle attached txs; txs={:?}", tx_ids)
                 })?,
-            Message::NewYuxTxs(txs) => self
-                .handle_yuv_txs(txs, None)
-                .await
-                .wrap_err("failed to handle provide proofs event")?,
             Message::P2P(p2p_event) => self
                 .handle_p2p_msg(p2p_event)
                 .await
                 .wrap_err("failed to handle p2p event")?,
             Message::ConfirmBatchTx(txs) => self
-                .handle_yuv_txs_to_confirm(txs)
+                .handle_yuv_txs(txs, None)
                 .await
                 .wrap_err("failed to handle transaction to confirm")?,
+            Message::HandleAnnouncement(txid) => self.handle_announcement(txid).await,
         }
 
         Ok(())
@@ -167,21 +162,18 @@ where
     /// Handles a P2P event.
     pub async fn handle_p2p_msg(&mut self, message: ControllerP2PMessage) -> Result<()> {
         match message {
-            ControllerP2PMessage::Inv { inv, sender } => {
-                self.handle_inv(inv, sender)
-                    .await
-                    .wrap_err("failed to handle inbound inv")?;
-            }
-            ControllerP2PMessage::GetData { inv, sender } => {
-                self.handle_get_data(inv, sender)
-                    .await
-                    .wrap_err("failed to handle inbound get data")?;
-            }
-            ControllerP2PMessage::YuvTx { txs, sender } => {
-                self.handle_yuv_txs(txs, Some(sender))
-                    .await
-                    .wrap_err("failed to handle yuv txs")?;
-            }
+            ControllerP2PMessage::Inv { inv, sender } => self
+                .handle_inv(inv, sender)
+                .await
+                .wrap_err("failed to handle inbound inv")?,
+            ControllerP2PMessage::GetData { inv, sender } => self
+                .handle_get_data(inv, sender)
+                .await
+                .wrap_err("failed to handle inbound get data")?,
+            ControllerP2PMessage::YuvTx { txs, sender } => self
+                .handle_yuv_txs(txs, Some(sender))
+                .await
+                .wrap_err("failed to handle yuv txs")?,
         };
 
         Ok(())
@@ -318,54 +310,25 @@ where
                     .insert_if_not_exists(tx_id, TxState::Pending)
                     .await;
 
-                tracing::debug!("added tx to the state storage: {}", tx_id);
+                tracing::debug!("added pending tx to the state storage: {}", tx_id);
 
                 new_txs.push(yuv_tx);
+                continue;
             }
+            tracing::debug!("Tx {} exists in the storage", tx_id);
         }
 
         if !new_txs.is_empty() {
-            tracing::debug!("Received new yuv txs: {:?}", new_txs);
-
-            self.event_bus
-                .send(TxCheckerMessage::NewTxs {
-                    txs: new_txs,
-                    sender,
-                })
-                .await;
-        }
-
-        Ok(())
-    }
-
-    /// Handles a batch of [`YuvTransaction`] that should be confirmed with the TxConfirmator.
-    pub async fn handle_yuv_txs_to_confirm(&self, yuv_txs: Vec<YuvTransaction>) -> Result<()> {
-        let mut yuv_txs_to_confirm: Vec<YuvTransaction> = Vec::new();
-
-        for yuv_tx in yuv_txs {
-            let tx_id = yuv_tx.bitcoin_tx.txid();
-
-            let is_tx_exist = self
-                .is_tx_exist(&tx_id)
-                .await
-                .wrap_err("failed to check if tx exist")?;
-
-            if is_tx_exist {
-                continue;
+            if let Some(sender) = sender {
+                tracing::debug!("Received new yuv txs from {}: {:?}", sender, new_txs);
+            } else {
+                tracing::debug!("Received new yuv txs: {:?}", new_txs);
             }
 
-            self.handling_txs
-                .insert_if_not_exists(tx_id, TxState::Pending)
-                .await;
-
-            yuv_txs_to_confirm.push(yuv_tx);
-        }
-
-        if !yuv_txs_to_confirm.is_empty() {
             self.event_bus
-                .send(ConfirmationIndexerMessage::ConfirmBatchTx(
-                    yuv_txs_to_confirm,
-                ))
+                .send(TxConfirmMessage::ConfirmBatchTx(TxsToConfirm::YuvTxs(
+                    new_txs,
+                )))
                 .await;
         }
 
@@ -394,6 +357,13 @@ where
         tracing::info!("Inventory has been updated with checked and attached txs");
 
         Ok(())
+    }
+
+    /// Handles checked announcement. It removes it from the handling_txs list.
+    pub async fn handle_announcement(&mut self, txid: Txid) {
+        self.handling_txs.remove(&txid).await;
+
+        tracing::info!("Announcement {} is handled", txid);
     }
 
     pub async fn send_get_data(
@@ -428,7 +398,12 @@ where
             .await
             .wrap_err("failed to get yuv tx")?;
 
-        if yuv_tx.is_some() {
+        if let Some(yuv_tx) = yuv_tx {
+            // If the transaction exists, but it's an [IssueAnnouncement], we should still
+            // mark it as non-existing so an Issue transaction can override it.
+            if let YuvTxType::Announcement(Announcement::Issue { .. }) = yuv_tx.tx_type {
+                return Ok(false);
+            }
             return Ok(true);
         }
 

@@ -8,8 +8,12 @@ pub const DEFAULT_POLLING_PERIOD: Duration = Duration::from_secs(5);
 
 /// One day:
 pub const DEFAULT_MAX_CONFIRMATION_TIME: Duration = Duration::from_secs(60 * 60 * 24);
+/// Default interval of checking if the transactions that are waiting for the confirmation should be deleted from the queue.
+pub const DEFAULT_CLEAN_UP_INTERVAL: Duration = Duration::from_secs(30);
 
+/// Default interval between attempts of restarting the indexer.
 pub const DEFAULT_RESTART_INTERVAL: Duration = Duration::from_secs(5);
+/// Default number of attempts to restart the indexer.
 pub const MAX_RESTART_ATTEMPTS: u32 = 10;
 
 #[derive(Clone, Deserialize)]
@@ -25,6 +29,9 @@ pub struct IndexerConfig {
 
     #[serde(default = "default_max_confirmation_time")]
     pub max_confirmation_time: Duration,
+
+    #[serde(default = "default_clean_up_interval")]
+    pub clean_up_interval: Duration,
 
     #[serde(default)]
     pub blockloader: BlockLoaderConfig,
@@ -52,6 +59,10 @@ fn default_max_restart_attempts() -> u32 {
     MAX_RESTART_ATTEMPTS
 }
 
+fn default_clean_up_interval() -> Duration {
+    DEFAULT_CLEAN_UP_INTERVAL
+}
+
 impl From<IndexerConfig> for IndexingParams {
     fn from(value: IndexerConfig) -> Self {
         let def = IndexingParams::default();
@@ -73,6 +84,7 @@ impl Default for IndexerConfig {
             blockloader: BlockLoaderConfig::default(),
             restart_interval: default_restart_interval(),
             max_restart_attempts: default_max_restart_attempts(),
+            clean_up_interval: default_clean_up_interval(),
         }
     }
 }

@@ -1,6 +1,7 @@
 use alloc::vec::Vec;
 use bitcoin::Txid;
 use core::fmt::Debug;
+
 use event_bus::Event;
 use std::net::SocketAddr;
 
@@ -29,10 +30,10 @@ pub enum ControllerMessage {
     },
     /// Send signed transactions for on-chain confirmation.
     ConfirmBatchTx(Vec<YuvTransaction>),
+    /// Remove checked announcement from handling transactions.
+    HandleAnnouncement(Txid),
     /// New inventory to share with peers.
     AttachedTxs(Vec<Txid>),
-    /// Provide new transactions.
-    NewYuxTxs(Vec<YuvTransaction>),
     /// Data that is received from p2p.
     P2P(ControllerP2PMessage),
 }
@@ -83,7 +84,21 @@ pub enum GraphBuilderMessage {
 
 /// Message to ConfirmationIndexer.
 #[derive(Clone, Debug, Event)]
-pub enum ConfirmationIndexerMessage {
+pub enum TxConfirmMessage {
     /// Send transactions for confirmation.
-    ConfirmBatchTx(Vec<YuvTransaction>),
+    ConfirmBatchTx(TxsToConfirm),
+}
+
+/// Transactions to be sent to the `TxConfirmator`.
+#[derive(Clone, Debug)]
+pub enum TxsToConfirm {
+    /// List of Yuv transactions.
+    ///
+    /// Expected to come from the RPC and P2P.
+    YuvTxs(Vec<YuvTransaction>),
+
+    /// List of Txids.
+    ///
+    /// Expected to come from the confirmation subindexer.
+    Txids(Vec<Txid>),
 }

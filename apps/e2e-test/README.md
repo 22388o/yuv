@@ -9,6 +9,8 @@ For example, lets setup a test with five working YUV nodes, one Bitcoin node and
 Setup configuration file for the test will look as follows:
 
 ``` toml
+duration = { secs = 500, nanos = 0 }
+
 [nodes]
 # List of YUV nodes that will be randomly distributed among the accounts. 
 # *At least one required.
@@ -36,6 +38,12 @@ funding_interval = 60
 # Defines the threshold needed to initiate a tx check (number of accounts)
 # For example, if threshold is 20, the tx check will start when there are at least 20 transactions broadcasted.
 threshold = 20
+# Experimental: will count the expected balances and compare it to the actual balances in the end of the test.
+# The balances often don't match because of the bad synchronization.
+check_balances_matching = false
+
+[miner]
+interval = { secs = 1, nanos = 0 }
 
 [report]
 result_path = ".result.dev.txt"

@@ -1,6 +1,7 @@
 use serde::Deserialize;
 
-pub const DEFAULT_POOL_SIZE: usize = 10;
+/// Default number of tx checker workers.
+pub const DEFAULT_POOL_SIZE: usize = 2;
 
 #[derive(Deserialize)]
 pub struct CheckersConfig {

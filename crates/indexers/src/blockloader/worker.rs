@@ -66,7 +66,7 @@ impl Worker {
                             self.rate_limit_reached = true;
                         }
 
-                        tracing::error!(?block_height, %err, "Failed to get block");
+                        tracing::warn!(?block_height, %err, "Failed to get block");
                         FetchLoadedBlockEvent::FailedBlock(block_height)
                     }
                 };

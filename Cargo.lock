@@ -376,7 +376,7 @@ dependencies = [
 
 [[package]]
 name = "bitcoin-client"
-version = "0.4.0"
+version = "0.4.3"
 dependencies = [
  "async-trait",
  "bitcoin",
@@ -483,7 +483,7 @@ checksum = "b4ae4235e6dac0694637c763029ecea1a2ec9e4e06ec2729bd21ba4d9c863eb7"
 
 [[package]]
 name = "bulletproof"
-version = "0.4.0"
+version = "0.4.3"
 dependencies = [
  "k256",
  "lazy_static",
@@ -953,7 +953,7 @@ checksum = "0d6ef0072f8a535281e4876be788938b528e9a1d43900b82c2569af7da799125"
 
 [[package]]
 name = "e2e-test"
-version = "0.4.0"
+version = "0.4.3"
 dependencies = [
  "bdk",
  "bitcoin",
@@ -1145,7 +1145,7 @@ dependencies = [
 
 [[package]]
 name = "event-bus"
-version = "0.4.0"
+version = "0.4.3"
 dependencies = [
  "event-bus-macros",
  "flume",
@@ -1155,7 +1155,7 @@ dependencies = [
 
 [[package]]
 name = "event-bus-macros"
-version = "0.4.0"
+version = "0.4.3"
 dependencies = [
  "event-bus",
  "quote",
@@ -3362,7 +3362,7 @@ checksum = "3369f5ac52d5eb6ab48c6b4ffdc8efbcad6b89c765749064ba298f2c68a16a76"
 
 [[package]]
 name = "tests"
-version = "0.4.0"
+version = "0.4.3"
 dependencies = [
  "bdk",
  "bitcoin",
@@ -4248,7 +4248,7 @@ dependencies = [
 
 [[package]]
 name = "ydk"
-version = "0.4.0"
+version = "0.4.3"
 dependencies = [
  "bdk",
  "bitcoin",
@@ -4270,7 +4270,7 @@ dependencies = [
 
 [[package]]
 name = "yuv-cli"
-version = "0.4.0"
+version = "0.4.3"
 dependencies = [
  "bdk",
  "bitcoin",
@@ -4299,7 +4299,7 @@ dependencies = [
 
 [[package]]
 name = "yuv-controller"
-version = "0.4.0"
+version = "0.4.3"
 dependencies = [
  "bitcoin",
  "event-bus",
@@ -4315,7 +4315,7 @@ dependencies = [
 
 [[package]]
 name = "yuv-indexers"
-version = "0.4.0"
+version = "0.4.3"
 dependencies = [
  "async-trait",
  "bitcoin",
@@ -4337,7 +4337,7 @@ dependencies = [
 
 [[package]]
 name = "yuv-p2p"
-version = "0.4.0"
+version = "0.4.3"
 dependencies = [
  "async-trait",
  "bitcoin",
@@ -4368,7 +4368,7 @@ dependencies = [
 
 [[package]]
 name = "yuv-pixels"
-version = "0.4.0"
+version = "0.4.3"
 dependencies = [
  "bitcoin",
  "bulletproof",
@@ -4381,7 +4381,7 @@ dependencies = [
 
 [[package]]
 name = "yuv-rpc-api"
-version = "0.4.0"
+version = "0.4.3"
 dependencies = [
  "async-trait",
  "bitcoin",
@@ -4393,7 +4393,7 @@ dependencies = [
 
 [[package]]
 name = "yuv-rpc-server"
-version = "0.4.0"
+version = "0.4.3"
 dependencies = [
  "async-trait",
  "bitcoin",
@@ -4415,7 +4415,7 @@ dependencies = [
 
 [[package]]
 name = "yuv-storage"
-version = "0.4.0"
+version = "0.4.3"
 dependencies = [
  "async-trait",
  "bitcoin",
@@ -4433,7 +4433,7 @@ dependencies = [
 
 [[package]]
 name = "yuv-tx-attach"
-version = "0.4.0"
+version = "0.4.3"
 dependencies = [
  "bitcoin",
  "bitcoin-client",
@@ -4453,7 +4453,7 @@ dependencies = [
 
 [[package]]
 name = "yuv-tx-check"
-version = "0.4.0"
+version = "0.4.3"
 dependencies = [
  "bitcoin",
  "bitcoin-client",
@@ -4476,14 +4476,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "yuv-tx-confirm"
+version = "0.4.3"
+dependencies = [
+ "bitcoin",
+ "bitcoin-client",
+ "event-bus",
+ "eyre",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "yuv-types",
+]
+
+[[package]]
 name = "yuv-types"
-version = "0.4.0"
+version = "0.4.3"
 dependencies = [
  "bitcoin",
  "ciborium",
  "core2 0.4.0",
  "dyn-clone",
  "event-bus",
+ "eyre",
  "once_cell",
  "serde",
  "serde_json",
@@ -4494,7 +4509,7 @@ dependencies = [
 
 [[package]]
 name = "yuvd"
-version = "0.4.0"
+version = "0.4.3"
 dependencies = [
  "bitcoin",
  "bitcoin-client",
@@ -4518,6 +4533,7 @@ dependencies = [
  "yuv-storage",
  "yuv-tx-attach",
  "yuv-tx-check",
+ "yuv-tx-confirm",
  "yuv-types",
 ]
 

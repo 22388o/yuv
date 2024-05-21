@@ -12,7 +12,7 @@ Setup configuration file for first node:
 # config-1.toml
 [p2p]
 address = "0.0.0.0:8002" # address on which node will listen p2p connections
-network = "regtest" # p2p network type, accepting values: mainnet, bitcoin, testnet, regtest, sigtest
+network = "regtest" # p2p network type, accepting values: mainnet, bitcoin, testnet, regtest, sigtest, mutiny
 max_inbound_connections = 16 # maximum number of inbound connections
 max_outbound_connections = 8 # maximum number of outbound connections
 bootnodes = [] # list of ip addresses of nodes to connect
@@ -68,7 +68,7 @@ Setup configuration file for second node:
 # config-2.toml
 [p2p]
 port = 8002 # if settuping locally, bumping port here
-network = "regtest" # p2p network type, accepting values: mainnet, bitcoin, testnet, regtest, sigtest
+network = "regtest" # p2p network type, accepting values: mainnet, bitcoin, testnet, regtest, sigtest, mutiny
 max_inbound_connections = 16 # maximum number of inbound connections
 max_outbound_connections = 8 # maximum number of outbound connections
 bootnodes = ["127.0.0.1:8001"] # address of first node

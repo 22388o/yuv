@@ -19,8 +19,8 @@ use yuv_tx_attach::GraphBuilder;
 use yuv_tx_check::{Config, TxCheckerWorkerPool};
 use yuv_types::messages::p2p::Inventory;
 use yuv_types::{
-    ConfirmationIndexerMessage, ControllerMessage, ControllerP2PMessage, GraphBuilderMessage,
-    TxCheckerMessage, YuvTransaction,
+    ControllerMessage, ControllerP2PMessage, GraphBuilderMessage, TxCheckerMessage,
+    TxConfirmMessage, YuvTransaction,
 };
 
 mod common;
@@ -52,15 +52,6 @@ pub fn new_messages(
 
     for _ in 0..msg_amount {
         messages.append(&mut vec![
-            {
-                let txs = gen_new_yuv_txs(txs_per_message, generator);
-                for tx in txs.clone() {
-                    rpc_api
-                        .expect_get_raw_transaction()
-                        .returning(move |_, _| Ok(tx.clone().bitcoin_tx));
-                }
-                ControllerMessage::NewYuxTxs(txs)
-            },
             ControllerMessage::InvalidTxs {
                 tx_ids: gen_new_yuv_tx_ids(txs_per_message, generator),
                 sender: None,
@@ -116,7 +107,7 @@ pub fn init_event_bus() -> EventBus {
     let mut event_bus = EventBus::default();
 
     event_bus.register::<TxCheckerMessage>(None);
-    event_bus.register::<ConfirmationIndexerMessage>(None);
+    event_bus.register::<TxConfirmMessage>(None);
     event_bus.register::<ControllerMessage>(None);
     event_bus.register::<GraphBuilderMessage>(None);
 
@@ -126,10 +117,9 @@ pub fn init_event_bus() -> EventBus {
 fn spawn_graph_builder(
     event_bus: &EventBus,
     txs_storage: LevelDB,
-    state_storage: LevelDB,
     cancellation: CancellationToken,
 ) {
-    let graph_builder = GraphBuilder::new(txs_storage, state_storage, event_bus, 100);
+    let graph_builder = GraphBuilder::new(txs_storage, event_bus, 100);
 
     tokio::spawn(graph_builder.run(cancellation.clone()));
 }
@@ -139,14 +129,12 @@ fn spawn_tx_checker_worker_pool(
     event_bus: &EventBus,
     txs_storage: LevelDB,
     state_storage: LevelDB,
-    btc_client: &Arc<MockRpcApi>,
     cancellation: CancellationToken,
 ) -> eyre::Result<()> {
     let worker_pool = TxCheckerWorkerPool::from_config(
         size,
         Config {
             full_event_bus: event_bus.clone(),
-            bitcoin_client: btc_client.clone(),
             txs_storage: txs_storage.clone(),
             state_storage: state_storage.clone(),
         },
@@ -212,19 +200,13 @@ pub async fn tx_controller_benchmark(c: &mut Criterion) {
 
     let cancellation = CancellationToken::new();
 
-    spawn_graph_builder(
-        &event_bus,
-        txs_storage.clone(),
-        state_storage.clone(),
-        cancellation.clone(),
-    );
+    spawn_graph_builder(&event_bus, txs_storage.clone(), cancellation.clone());
 
     spawn_tx_checker_worker_pool(
         1000,
         &event_bus,
         txs_storage.clone(),
         state_storage.clone(),
-        &rpc_api,
         cancellation.clone(),
     )
     .expect("failed to start tx checker pool");

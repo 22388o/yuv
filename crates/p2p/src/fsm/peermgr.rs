@@ -10,8 +10,9 @@ use trust_dns_resolver::{
 
 use bitcoin::{
     network::address::Address, network::constants::ServiceFlags,
-    network::message_network::VersionMessage, Network,
+    network::message_network::VersionMessage,
 };
+use yuv_types::network::Network;
 
 use crate::{
     common::peer::{AddressSource, Source},
@@ -849,6 +850,7 @@ impl<U: Connect + Disconnect + SetTimer + Wire<Event>, C: Clock + Sync> PeerMana
             Network::Testnet => &[],
             Network::Regtest => &[],
             Network::Signet => &[],
+            Network::Mutiny => &[],
         }
     }
 
@@ -859,6 +861,7 @@ impl<U: Connect + Disconnect + SetTimer + Wire<Event>, C: Clock + Sync> PeerMana
             Network::Testnet => 18333,
             Network::Regtest => 18444,
             Network::Signet => 38333,
+            Network::Mutiny => 38332,
         }
     }
 

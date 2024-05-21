@@ -1,5 +1,5 @@
 mod nodes;
-use std::path::PathBuf;
+use std::{path::PathBuf, time::Duration};
 
 use bdk::blockchain::{
     rpc::{Auth, RpcSyncParams},
@@ -11,9 +11,11 @@ pub(crate) use nodes::{BitcoinNode, NodesConfig};
 
 mod accounts;
 mod checker;
+mod miner;
 mod report;
 use accounts::AccountsConfig;
 use checker::CheckerConfig;
+use miner::MinerConfig;
 use rand::{seq::IteratorRandom, thread_rng};
 use report::ReportConfig;
 use serde::Deserialize;
@@ -22,10 +24,12 @@ use config::Config;
 
 #[derive(Deserialize, Debug, Clone)]
 pub(crate) struct TestConfig {
+    pub duration: Option<Duration>,
     pub nodes: NodesConfig,
     pub accounts: AccountsConfig,
     pub checker: CheckerConfig,
     pub report: ReportConfig,
+    pub miner: MinerConfig,
 }
 
 impl TestConfig {

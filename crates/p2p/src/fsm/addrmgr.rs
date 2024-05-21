@@ -367,8 +367,17 @@ impl<P: Store, U: Wire<Event>, C: Clock> AddressManager<P, U, C> {
                 continue;
             }
 
+            let Ok(socket_addr) = addr.socket_addr() else {
+                continue;
+            };
+
             // No banned addresses.
-            if self.bans.contains(&addr.socket_addr().unwrap().ip()) {
+            if self.bans.contains(&socket_addr.ip()) {
+                continue;
+            }
+
+            // No local addresses.
+            if self.local_addrs.contains(&socket_addr) {
                 continue;
             }
 
@@ -381,7 +390,7 @@ impl<P: Store, U: Wire<Event>, C: Clock> AddressManager<P, U, C> {
                 continue;
             }
 
-            self.populate_address_ranges(&addr.socket_addr().unwrap());
+            self.populate_address_ranges(&socket_addr);
         }
     }
 

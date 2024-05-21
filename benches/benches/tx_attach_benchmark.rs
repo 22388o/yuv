@@ -52,10 +52,9 @@ fn new_messages(
 async fn spawn_graph_builder(
     event_bus: &EventBus,
     txs_storage: LevelDB,
-    state_storage: LevelDB,
     cancellation: CancellationToken,
 ) {
-    let graph_builder = GraphBuilder::new(txs_storage, state_storage, event_bus, 100);
+    let graph_builder = GraphBuilder::new(txs_storage, event_bus, 100);
 
     tokio::spawn(graph_builder.run(cancellation));
 }
@@ -72,19 +71,10 @@ async fn tx_attach_benchmark(c: &mut Criterion) {
     let txs_storage = LevelDB::in_memory()
         .wrap_err("failed to initialize storage")
         .unwrap();
-    let state_storage = LevelDB::in_memory()
-        .wrap_err("failed to initialize storage")
-        .unwrap();
 
     let cancellation = CancellationToken::new();
 
-    spawn_graph_builder(
-        &event_bus,
-        txs_storage.clone(),
-        state_storage.clone(),
-        cancellation,
-    )
-    .await;
+    spawn_graph_builder(&event_bus, txs_storage.clone(), cancellation).await;
 
     let mut tx_generator = TxGenerator::default();
 

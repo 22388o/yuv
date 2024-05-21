@@ -11,7 +11,7 @@ use ydk::{
 use yuv_types::YuvTransaction;
 
 use crate::{
-    cli::{faucet::Faucet, tx_checker::TxChecker},
+    cli::{faucet::Faucet, miner::Miner, tx_checker::TxChecker},
     config::TestConfig,
 };
 use bdk::blockchain::rpc::Auth;
@@ -57,6 +57,9 @@ impl E2e {
             self.config.nodes.yuv.len(),
             self.config.nodes.bitcoin.len()
         );
+        if let Some(duration) = self.config.duration {
+            info!("Test will end in {:?}", duration);
+        };
 
         // Generate the accounts
         let accounts = Self::generate_accounts(&self.config).await?;
@@ -77,6 +80,19 @@ impl E2e {
 
         // Pick the funder.
         let funder = Self::generate_account(&self.config, &Secp256k1::new(), true).await?;
+        // Init the miner.
+        let miner = Miner::new(
+            funder.p2wpkh_address()?,
+            self.config.get_bitcoin_node("miner")?.1,
+        );
+
+        // Spawn the miner.
+        let cancellation_token = self.cancellation_token.clone();
+        self.task_tracker.spawn(
+            miner
+                .run(self.config.miner.interval, cancellation_token)
+                .instrument(span!(Level::ERROR, "miner")),
+        );
         // Init the faucet.
         let faucet = Faucet::new(funder, self.config.get_bitcoin_node("faucet")?.1);
         let faucet_span = span!(Level::ERROR, "faucet");
@@ -152,7 +168,7 @@ impl E2e {
     }
 
     /// `shutdown` handles the graceful shutdown of the test.
-    pub async fn shutdown(&self) {
+    pub async fn shutdown(self) {
         info!("Gracefully stopping the test");
 
         self.cancellation_token.cancel();

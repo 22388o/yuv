@@ -59,14 +59,12 @@ async fn spawn_tx_checker_worker_pool(
     event_bus: &EventBus,
     txs_storage: LevelDB,
     state_storage: LevelDB,
-    btc_client: Arc<MockRpcApi>,
     cancellation: CancellationToken,
 ) -> eyre::Result<()> {
     let worker_pool = TxCheckerWorkerPool::from_config(
         size,
         Config {
             full_event_bus: event_bus.clone(),
-            bitcoin_client: btc_client.clone(),
             txs_storage: txs_storage.clone(),
             state_storage: state_storage.clone(),
         },
@@ -113,7 +111,6 @@ async fn tx_check_benchmark(c: &mut Criterion) {
         &event_bus,
         txs_storage.clone(),
         state_storage.clone(),
-        rpc_api.clone(),
         cancellation,
     )
     .await

@@ -9,6 +9,7 @@ use std::sync::{Arc, Mutex};
 use std::{cell::RefCell, collections::VecDeque, net, rc::Rc};
 use tracing::debug;
 use yuv_types::messages::p2p::{Inventory, NetworkMessage, RawNetworkMessage};
+use yuv_types::network::Network;
 use yuv_types::YuvTransaction;
 
 use crate::{
@@ -16,7 +17,7 @@ use crate::{
     fsm::handler::{DisconnectReason, PeerId},
     net::LocalDuration,
 };
-use bitcoin::{network::address::Address, network::message_network::VersionMessage, Network};
+use bitcoin::{network::address::Address, network::message_network::VersionMessage};
 
 /// Output of a state transition of the `Protocol` state machine.
 pub type Io = crate::net::Io<RawNetworkMessage, Event, DisconnectReason>;

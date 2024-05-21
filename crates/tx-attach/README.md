@@ -51,7 +51,7 @@ let mut event_bus = EventBus::default();
 event_bus.register::<GraphBuilderMessage>(Some(100));
 event_bus.register::<ControllerMessage>(Some(100));
 
-let mut graph_builder = GraphBuilder::new(storage.clone(), storage.clone(), &event_bus, 10);
+let mut graph_builder = GraphBuilder::new(storage.clone(), &event_bus, 10);
 # })
 ```
 
@@ -82,19 +82,19 @@ $I$ - a map of inverse dependencies (where, in our case, $I\[7\] = \\{4\\}$, bec
 So the algorithm will go as follows:
 
 - For each transaction in $B$:
-    - If transaction is **Issuance**, add it to $V$ (attached) and add to
+  - If transaction is **Issuance**, add it to $V$ (attached) and add to
       $Q$ all transactions that are depend on it from $I$.
-    - If transaction is **Transfer**, iterate through each parent transaction
+  - If transaction is **Transfer**, iterate through each parent transaction
       and check if it's in $V$. If not, add edge to $D$ and $I$.
-    - If all parents are attached add current transaction to $V$, remove entry
+  - If all parents are attached add current transaction to $V$, remove entry
       from $D$, and add all transactions that are depend on it to $Q$ from $I$.
-    - If not, add transaction to $S$.
+  - If not, add transaction to $S$.
 - For each transaction in $Q$:
   - Get its all dependencies from $D$ and for each one check if it's in $V$,
     if so, remove it from $D$.
   - If dependencies of current transaction are empty, add it to $V$ and add all
     transactions that are depend on it to $Q$ from $I$, remove from $S$.
-    
+
 In our case, firstly we will iterate through $B$ and add 7 to $V = \\{1, 2, 3,
 7\\}$ (as it's issuance):
 

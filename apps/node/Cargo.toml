@@ -15,6 +15,7 @@ yuv-controller = { path = "../../crates/controller" }
 yuv-tx-check = { path = "../../crates/tx-check" }
 bitcoin-client = { path = "../../crates/bitcoin-client" }
 yuv-tx-attach = { path = "../../crates/tx-attach" }
+yuv-tx-confirm = { path = "../../crates/tx-confirm" }
 yuv-rpc-server = { path = "../../crates/rpc-server" }
 yuv-indexers = { path = "../../crates/indexers" }
 event-bus = { path = "../../crates/event-bus" }

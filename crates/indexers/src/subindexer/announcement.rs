@@ -43,7 +43,7 @@ impl AnnouncementsIndexer {
                     Ok(announcement) => {
                         announcement_opt = Some(announcement.clone());
                     }
-                    Err(ParseOpReturnError::InvalidAnnouncement(err)) => {
+                    Err(ParseOpReturnError::InvaliOpReturnData(err)) => {
                         tracing::debug!("Found invalid announcement: {err}");
                     }
                     _ => {}
@@ -63,7 +63,9 @@ impl AnnouncementsIndexer {
         }
 
         if !txs.is_empty() {
-            self.event_bus.send(ControllerMessage::NewYuxTxs(txs)).await;
+            self.event_bus
+                .send(ControllerMessage::ConfirmBatchTx(txs))
+                .await;
         }
 
         Ok(())

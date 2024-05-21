@@ -82,13 +82,13 @@ pub fn announcement_from_script(script: &Script) -> Result<Announcement, ParseOp
 ///
 /// [error]: ParseOpReturnError
 /// [`OP_RETURN`]: bitcoin::blockdata::opcodes::all::OP_RETURN
-pub fn parse_op_return_script<T, ParseE, ParseFn>(
+pub fn parse_op_return_script<T, ParseError, ParseFn>(
     script: &Script,
     parse_fn: ParseFn,
 ) -> Result<T, ParseOpReturnError>
 where
-    ParseE: fmt::Display,
-    ParseFn: FnOnce(&[u8]) -> Result<T, ParseE>,
+    ParseError: fmt::Display,
+    ParseFn: FnOnce(&[u8]) -> Result<T, ParseError>,
 {
     if !script.is_op_return() {
         return Err(ParseOpReturnError::NoOpReturn);
@@ -105,7 +105,11 @@ where
 
     match &instructions[1] {
         Instruction::PushBytes(bytes) => {
-            parse_fn(bytes).map_err(|err| ParseOpReturnError::InvalidAnnouncement(err.to_string()))
+            if !is_announcement(bytes) {
+                return Err(ParseOpReturnError::IsNotAnnouncement);
+            }
+
+            parse_fn(bytes).map_err(|err| ParseOpReturnError::InvaliOpReturnData(err.to_string()))
         }
         inst => Err(ParseOpReturnError::InvalidInstruction(
             instruction_into_opcode(inst),
@@ -122,7 +126,8 @@ pub enum ParseOpReturnError {
     NoOpReturn,
     InvalidInstruction(Opcodes),
     ScriptError(script::Error),
-    InvalidAnnouncement(String),
+    IsNotAnnouncement,
+    InvaliOpReturnData(String),
 }
 
 impl fmt::Display for ParseOpReturnError {
@@ -136,7 +141,8 @@ impl fmt::Display for ParseOpReturnError {
             Self::NoOpReturn => write!(f, "no OP_RETURN in script"),
             Self::InvalidInstruction(opcode) => write!(f, "invalid opcode {}", opcode),
             Self::ScriptError(e) => write!(f, "script error: {}", e),
-            Self::InvalidAnnouncement(e) => write!(f, "invalid announcement: {}", e),
+            Self::IsNotAnnouncement => write!(f, "it is not an announcement"),
+            Self::InvaliOpReturnData(e) => write!(f, "invalid announcement: {}", e),
         }
     }
 }
@@ -162,4 +168,8 @@ fn instruction_into_opcode(inst: &Instruction) -> Opcodes {
         Instruction::Op(op) => *op,
         Instruction::PushBytes(_) => OP_PUSHBYTES_32,
     }
+}
+
+fn is_announcement(src: &[u8]) -> bool {
+    src.len() >= ANNOUNCEMENT_MINIMAL_LENGTH && src[0..3] == ANNOUNCEMENT_PREFIX
 }

@@ -7,9 +7,10 @@ use flume as chan;
 
 use bitcoin;
 use bitcoin::network::{constants::ServiceFlags, Address};
-use bitcoin::Network;
+
 use event_bus::{typeid, EventBus};
 use tokio_util::sync::CancellationToken;
+use yuv_types::network::Network;
 use yuv_types::{
     messages::p2p::{Inventory, NetworkMessage},
     ControllerMessage, YuvTransaction,

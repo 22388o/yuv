@@ -21,9 +21,8 @@ use yuv_rpc_server::ServerConfig;
 use yuv_storage::{FlushStrategy, LevelDB, LevelDbOptions, TxStatesStorage};
 use yuv_tx_attach::GraphBuilder;
 use yuv_tx_check::{Config as CheckerConfig, TxCheckerWorkerPool};
-use yuv_types::{
-    ConfirmationIndexerMessage, ControllerMessage, GraphBuilderMessage, TxCheckerMessage,
-};
+use yuv_tx_confirm::TxConfirmator;
+use yuv_types::{ControllerMessage, GraphBuilderMessage, TxCheckerMessage, TxConfirmMessage};
 
 const DEFAULT_CHANNEL_SIZE: usize = 1000;
 
@@ -69,6 +68,7 @@ impl Node {
     pub async fn run(&self) -> eyre::Result<()> {
         self.spawn_graph_builder();
         self.spawn_tx_checkers_worker_pool()?;
+        self.spawn_tx_confirmator();
         self.spawn_indexer().await?;
 
         let p2p_handle = self.spawn_p2p()?;
@@ -114,7 +114,6 @@ impl Node {
     fn spawn_graph_builder(&self) {
         let graph_builder = GraphBuilder::new(
             self.txs_storage.clone(),
-            self.state_storage.clone(),
             &self.event_bus,
             self.config.storage.tx_per_page,
         );
@@ -128,7 +127,6 @@ impl Node {
             self.config.checkers.pool_size,
             CheckerConfig {
                 full_event_bus: self.event_bus.clone(),
-                bitcoin_client: self.btc_client.clone(),
                 txs_storage: self.txs_storage.clone(),
                 state_storage: self.state_storage.clone(),
             },
@@ -139,6 +137,18 @@ impl Node {
             .spawn(worker_pool.run(self.cancelation.clone()));
 
         Ok(())
+    }
+
+    fn spawn_tx_confirmator(&self) {
+        let tx_confirmator = TxConfirmator::new(
+            &self.event_bus,
+            self.btc_client.clone(),
+            self.config.indexer.max_confirmation_time,
+            self.config.indexer.clean_up_interval,
+        );
+
+        self.task_tracker
+            .spawn(tx_confirmator.run(self.cancelation.clone()));
     }
 
     fn spawn_rpc(&self) {
@@ -164,11 +174,7 @@ impl Node {
             BitcoinBlockIndexer::new(self.btc_client.clone(), self.state_storage.clone());
 
         indexer.add_indexer(AnnouncementsIndexer::new(&self.event_bus));
-        indexer.add_indexer(ConfirmationIndexer::new(
-            &self.event_bus,
-            self.btc_client.clone(),
-            self.config.indexer.max_confirmation_time,
-        ));
+        indexer.add_indexer(ConfirmationIndexer::new(&self.event_bus));
 
         let restart_interval = self.config.indexer.restart_interval;
         let mut current_attempt = 1;
@@ -239,7 +245,7 @@ impl Node {
         event_bus.register::<TxCheckerMessage>(Some(DEFAULT_CHANNEL_SIZE));
         event_bus.register::<GraphBuilderMessage>(Some(DEFAULT_CHANNEL_SIZE));
         event_bus.register::<ControllerMessage>(Some(DEFAULT_CHANNEL_SIZE));
-        event_bus.register::<ConfirmationIndexerMessage>(Some(DEFAULT_CHANNEL_SIZE));
+        event_bus.register::<TxConfirmMessage>(Some(DEFAULT_CHANNEL_SIZE));
 
         event_bus
     }

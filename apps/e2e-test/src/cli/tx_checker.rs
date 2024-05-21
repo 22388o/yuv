@@ -20,7 +20,7 @@ use jsonrpsee::http_client::HttpClient;
 use once_cell::sync::Lazy;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio_util::sync::CancellationToken;
-use tracing::{error, info, span, warn, Level};
+use tracing::{error, info, instrument, warn, Level};
 use yuv_pixels::Chroma;
 use yuv_rpc_api::transactions::{GetRawYuvTransactionResponse, YuvTransactionsRpcClient};
 use yuv_types::{ProofMap, YuvTransaction};
@@ -36,6 +36,7 @@ const DEFAULT_RESULT_PATH: &str = "result.dev.csv";
 
 type Amounts = HashMap<PublicKey, HashMap<Chroma, u128>>;
 
+#[derive(Debug)]
 pub(crate) struct TxChecker {
     config: TestConfig,
     txs_state: HashMap<Txid, u32>,
@@ -124,19 +125,16 @@ impl TxChecker {
                         };
                     }
 
+                    info!("The final check is over");
                     writer.flush()?;
 
-                    info!("Checking balances matching");
-
                     // Check if balances match.
-                    let secp = Secp256k1::new();
-                    for (private_key, balance) in balances {
-                        span!(
-                            Level::INFO,
-                            "balance_checker",
-                            private_key = private_key.to_string()
-                        )
-                        .in_scope(|| self.check_balance(private_key, balance, &secp));
+                    if self.config.checker.check_balances_matching {
+                        info!("Checking balances matching");
+                        let secp = Secp256k1::new();
+                        for (private_key, balance) in balances {
+                            self.check_balance(private_key, balance, &secp);
+                        }
                     }
 
                     return Ok(());
@@ -270,6 +268,11 @@ impl TxChecker {
     }
 
     /// `check_balance` checks if the actual balances match the expected balances for a certain address.
+    #[instrument(level = Level::INFO,
+        name = "balance_checker",
+        fields(private_key = private_key.to_string()),
+        skip(self, balances, secp)
+    )]
     fn check_balance(
         &self,
         private_key: PrivateKey,

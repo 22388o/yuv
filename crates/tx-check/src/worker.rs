@@ -1,31 +1,27 @@
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
-use std::sync::Arc;
 
-use bitcoin::{OutPoint, TxIn, Txid};
-use bitcoin_client::BitcoinRpcApi;
+use bitcoin::{OutPoint, Txid};
 use event_bus::{typeid, EventBus};
 use eyre::{eyre, Context, Result};
 use tokio_util::sync::CancellationToken;
 
 use yuv_pixels::PixelProof;
 use yuv_storage::{ChromaInfoStorage, FrozenTxsStorage, InvalidTxsStorage, TransactionsStorage};
-use yuv_types::announcements::{ChromaAnnouncement, FreezeAnnouncement, IssueAnnouncement};
+use yuv_types::announcements::{
+    ChromaAnnouncement, ChromaInfo, FreezeAnnouncement, IssueAnnouncement,
+};
 use yuv_types::messages::p2p::Inventory;
 use yuv_types::{
     Announcement, ControllerMessage, GraphBuilderMessage, ProofMap, TxCheckerMessage,
     YuvTransaction, YuvTxType,
 };
 
-use crate::transaction::find_issuer_in_txinputs;
-use crate::{
-    errors::{CheckError, TxCheckerError},
-    transaction::check_transaction,
-};
+use crate::errors::CheckError;
+use crate::transaction::{check_issue_isolated, check_transfer_isolated, find_issuer_in_txinputs};
 
-pub struct Config<TxsStorage, StateStorage, BitcoinClient> {
+pub struct Config<TxsStorage, StateStorage> {
     pub full_event_bus: EventBus,
-    pub bitcoin_client: Arc<BitcoinClient>,
     pub txs_storage: TxsStorage,
     pub state_storage: StateStorage,
 }
@@ -35,30 +31,26 @@ pub struct Config<TxsStorage, StateStorage, BitcoinClient> {
 /// Accepts [`YuvTransaction`]s from channel, check them and sends to graph builder.
 ///
 /// [`TxChecker`]: struct.TxChecker.html
-pub struct TxCheckerWorker<TxsStorage, StateStorage, BitcoinClient> {
+pub struct TxCheckerWorker<TxsStorage, StateStorage> {
     /// Index of the worker in the worker pool
     index: usize,
 
-    /// Bitcoin RPC client to check that transaction exists.
-    bitcoin_client: Arc<BitcoinClient>,
-
     /// Inner storage of already checked and attached transactions.
-    txs_storage: TxsStorage,
+    pub(crate) txs_storage: TxsStorage,
 
     /// Storage for inner states of transactions.
-    state_storage: StateStorage,
+    pub(crate) state_storage: StateStorage,
 
     /// Event bus for simplifying communication with services
     event_bus: EventBus,
 }
 
-impl<TS, SS, BC> TxCheckerWorker<TS, SS, BC>
+impl<TS, SS> TxCheckerWorker<TS, SS>
 where
     TS: TransactionsStorage + Clone + Send + Sync + 'static,
     SS: InvalidTxsStorage + FrozenTxsStorage + ChromaInfoStorage + Clone + Send + Sync + 'static,
-    BC: BitcoinRpcApi + Send + Sync + 'static,
 {
-    pub fn from_config(config: &Config<TS, SS, BC>, index: Option<usize>) -> Self {
+    pub fn from_config(config: &Config<TS, SS>, index: Option<usize>) -> Self {
         let event_bus = config
             .full_event_bus
             .extract(
@@ -70,7 +62,6 @@ where
         Self {
             index: index.unwrap_or_default(),
             event_bus,
-            bitcoin_client: config.bitcoin_client.clone(),
             txs_storage: config.txs_storage.clone(),
             state_storage: config.state_storage.clone(),
         }
@@ -110,7 +101,10 @@ where
         Ok(())
     }
 
-    // TODO: refactor
+    /// Fully check the transaction depends on its type. It inform the controller about the invalid
+    /// transactions or request missing parent transactions (in case of [`YuvTxType::Transfer`]). It
+    /// also sends valid [`YuvTxType::Issue`] and [`YuvTxType::Transfer`] transactions to the graph
+    /// builder.
     pub async fn check_txs(
         &mut self,
         txs: Vec<YuvTransaction>,
@@ -120,67 +114,30 @@ where
         let mut invalid_txs = Vec::new();
         let mut not_found_parents = Vec::new();
 
+        tracing::debug!("Checking txs: {:?}", txs);
+
         for tx in txs {
-            if let Err(err) = self.check_tx_isolated(&tx).await {
-                tracing::info!(
-                    index = self.index,
-                    "Received an invalid transaction {}: {}",
-                    tx.bitcoin_tx.txid(),
-                    err.to_string(),
-                );
+            let is_valid = self
+                .check_transaction(
+                    tx.clone(),
+                    &mut invalid_txs,
+                    &mut checked_txs,
+                    &mut not_found_parents,
+                )
+                .await?;
 
-                invalid_txs.push(tx);
-
+            // There is no sense to put it into storage or mark as an invalid tx if it's an
+            // announcement.
+            if let YuvTxType::Announcement { .. } = &tx.tx_type {
                 continue;
             }
 
-            // Gather parent, that are still not in the storage nor in the current batch:
-            let is_tx_checked = match &tx.tx_type {
-                YuvTxType::Issue { announcement, .. } => {
-                    let announcement_tx = YuvTransaction {
-                        bitcoin_tx: tx.bitcoin_tx.clone(),
-                        tx_type: YuvTxType::Announcement(Announcement::Issue(announcement.clone())),
-                    };
-
-                    self.check_announcements(
-                        &announcement_tx,
-                        &Announcement::Issue(announcement.clone()),
-                        &mut invalid_txs,
-                    )
-                    .await?
-                }
-                YuvTxType::Announcement(announcement) => {
-                    // TODO: get rid of double announcement check when issuing tokens.
-                    if self
-                        .state_storage
-                        .get_invalid_tx(tx.bitcoin_tx.txid())
-                        .await?
-                        .is_none()
-                    {
-                        self.check_announcements(&tx, announcement, &mut invalid_txs)
-                            .await?
-                    } else {
-                        false
-                    }
-                }
-                // Transfer has inputs:
-                YuvTxType::Transfer {
-                    ref input_proofs, ..
-                } => {
-                    self.check_transfer(
-                        &tx,
-                        input_proofs,
-                        &checked_txs,
-                        &mut invalid_txs,
-                        &mut not_found_parents,
-                    )
-                    .await?
-                }
-            };
-
-            if is_tx_checked {
-                checked_txs.insert(tx.bitcoin_tx.txid(), tx);
+            if !is_valid {
+                invalid_txs.push(tx.clone());
+                continue;
             }
+
+            checked_txs.insert(tx.bitcoin_tx.txid(), tx);
         }
 
         // Send checked transactions to next worker:
@@ -225,32 +182,90 @@ where
         Ok(())
     }
 
+    /// Do the corresponding checks for the transaction based on its type.
+    async fn check_transaction(
+        &mut self,
+        tx: YuvTransaction,
+        invalid_txs: &mut Vec<YuvTransaction>,
+        checked_txs: &mut BTreeMap<Txid, YuvTransaction>,
+        not_found_parents: &mut Vec<Txid>,
+    ) -> Result<bool> {
+        let is_valid = match &tx.tx_type {
+            YuvTxType::Issue {
+                announcement,
+                output_proofs,
+            } => {
+                self.check_issuance(&tx, output_proofs, announcement)
+                    .await?
+            }
+            YuvTxType::Announcement(announcement) => {
+                self.check_announcements(&tx, announcement, invalid_txs)
+                    .await?
+            }
+            // Transfer has inputs:
+            YuvTxType::Transfer {
+                ref input_proofs,
+                output_proofs,
+            } => {
+                self.check_transfer(
+                    &tx,
+                    input_proofs,
+                    output_proofs,
+                    checked_txs,
+                    not_found_parents,
+                )
+                .await?
+            }
+        };
+
+        Ok(is_valid)
+    }
+
+    async fn check_issuance(
+        &self,
+        tx: &YuvTransaction,
+        output_proofs: &Option<ProofMap>,
+        announcement: &IssueAnnouncement,
+    ) -> Result<bool> {
+        if !self.check_issue_announcement(tx, announcement).await? {
+            return Ok(false);
+        }
+
+        if check_issue_isolated(&tx.bitcoin_tx, output_proofs, announcement).is_err() {
+            return Ok(false);
+        }
+
+        self.txs_storage.put_yuv_tx(tx.clone()).await?;
+
+        Ok(true)
+    }
+
     async fn check_transfer(
         &mut self,
         tx: &YuvTransaction,
         input_proofs: &ProofMap,
+        output_proofs: &ProofMap,
         checked_txs: &BTreeMap<Txid, YuvTransaction>,
-        invalid_txs: &mut Vec<YuvTransaction>,
         not_found_parents: &mut Vec<Txid>,
     ) -> Result<bool> {
+        if check_transfer_isolated(&tx.bitcoin_tx, input_proofs, output_proofs).is_err() {
+            return Ok(false);
+        }
+
         for (parent_id, proof) in input_proofs {
-            let Some(TxIn {
-                previous_output: parent,
-                ..
-            }) = tx.bitcoin_tx.input.get(*parent_id as usize)
-            else {
+            let Some(txin) = tx.bitcoin_tx.input.get(*parent_id as usize) else {
                 return Err(CheckError::InputNotFound.into());
             };
 
-            if self.is_output_frozen(parent, proof).await? {
+            let parent = txin.previous_output;
+
+            if self.is_output_frozen(&parent, proof).await? {
                 tracing::info!(
                     index = self.index,
                     "Transfer tx {} is invalid: output {} is frozen",
                     tx.bitcoin_tx.txid(),
                     parent,
                 );
-
-                invalid_txs.push(tx.clone());
 
                 return Ok(false);
             }
@@ -317,24 +332,6 @@ where
         Ok(is_frozen)
     }
 
-    async fn check_tx_isolated(&mut self, yuv_tx: &YuvTransaction) -> Result<(), TxCheckerError> {
-        // FIXME: for now we set as invalid transactions which failed in process of
-        // getting one from network (node). In future, we should check if it's problems with
-        // network or transaction is really invalid.
-        let got_tx = self
-            .bitcoin_client
-            .get_raw_transaction(&yuv_tx.bitcoin_tx.txid(), None)
-            .await?;
-
-        if got_tx != yuv_tx.bitcoin_tx {
-            return Err(TxCheckerError::TransactionMismatch);
-        }
-
-        check_transaction(yuv_tx)?;
-
-        Ok(())
-    }
-
     /// Check that all the [`Announcement`]s in transcation are valid.
     ///
     /// For more details see checks for specific types of announcement.
@@ -361,6 +358,10 @@ where
                 self.check_issue_announcement(tx, announcement).await?
             }
         };
+
+        self.event_bus
+            .send(ControllerMessage::HandleAnnouncement(tx.bitcoin_tx.txid()))
+            .await;
 
         if !is_checked {
             invalid_txs.push(tx.clone());
@@ -410,6 +411,8 @@ where
                 return Ok(false);
             }
         };
+
+        self.add_chroma_announcements(announcement).await?;
 
         Ok(true)
     }
@@ -490,6 +493,9 @@ where
             return Ok(false);
         }
 
+        self.update_freezes(announcement_tx.bitcoin_tx.txid(), announcement)
+            .await?;
+
         Ok(true)
     }
 
@@ -500,45 +506,59 @@ where
     /// 2. Issue amount doesn't exceed the max supply specified in the chroma announcement (if announced).
     async fn check_issue_announcement(
         &self,
-        announcement_tx: &YuvTransaction,
+        announcement_yuv_tx: &YuvTransaction,
         announcement: &IssueAnnouncement,
     ) -> Result<bool> {
-        let announcement_tx_inputs = &announcement_tx.bitcoin_tx.input;
+        let announcement_tx = &announcement_yuv_tx.bitcoin_tx;
         let chroma = &announcement.chroma;
+        let issue_amount = announcement.amount;
 
-        if find_issuer_in_txinputs(announcement_tx_inputs, chroma).is_none() {
+        if self
+            .txs_storage
+            .get_yuv_tx(&announcement_tx.txid())
+            .await?
+            .is_some()
+        {
+            return Ok(true);
+        }
+
+        if find_issuer_in_txinputs(&announcement_tx.input, chroma).is_none() {
             tracing::debug!(
                 index = self.index,
                 "Issue announcement tx {} is invalid: none of the inputs has issuer, removing it",
-                announcement_tx.bitcoin_tx.txid(),
+                announcement_yuv_tx.bitcoin_tx.txid(),
             );
 
             return Ok(false);
         }
 
-        if let Some(chroma_info) = self
-            .state_storage
-            .get_chroma_info(&announcement.chroma)
-            .await?
-        {
-            if let Some(chroma_announcement) = chroma_info.announcement {
-                if chroma_announcement.max_supply != 0
-                    && chroma_announcement.max_supply
-                        < chroma_info.total_supply + announcement.amount
-                {
-                    tracing::info!(
-                        index = self.index,
-                        "Issue announcement tx {} is invalid: current supply {} + announcement amount {} is higher than the max supply {}",
-                        announcement_tx.bitcoin_tx.txid(),
-                        chroma_info.total_supply,
-                        announcement.amount,
-                        chroma_announcement.max_supply,
-                    );
+        let chroma_info_opt = self.state_storage.get_chroma_info(chroma).await?;
 
-                    return Ok(false);
-                }
-            };
+        if let Some(ChromaInfo {
+            announcement: Some(ChromaAnnouncement { max_supply, .. }),
+            total_supply,
+        }) = chroma_info_opt
+        {
+            let new_total_supply = total_supply + issue_amount;
+
+            if max_supply != 0 && max_supply < new_total_supply {
+                tracing::info!(
+                    index = self.index,
+                    "Issue announcement tx {} is invalid: current supply {} + announcement amount {} is higher than the max supply {}",
+                    announcement_tx.txid(),
+                    total_supply,
+                    issue_amount,
+                    max_supply,
+                );
+
+                return Ok(false);
+            }
         }
+
+        self.update_supply(announcement).await?;
+        self.txs_storage
+            .put_yuv_tx(announcement_yuv_tx.clone())
+            .await?;
 
         Ok(true)
     }

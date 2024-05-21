@@ -1,13 +1,10 @@
-use bitcoin::Amount;
-use bitcoin_client::BitcoinRpcApi;
+use bdk::blockchain::Blockchain;
 use clap::Args;
 use color_eyre::eyre::{self, bail};
 use yuv_pixels::Chroma;
 use yuv_rpc_api::transactions::YuvTransactionsRpcClient;
 
 use crate::{actions::transfer::process_satoshis, context::Context};
-
-use super::rpc_args::RpcArgs;
 
 pub const DEFAULT_SATOSHIS: u64 = 1000;
 
@@ -33,8 +30,6 @@ pub struct IssueArgs {
     /// It's worth noting that change from regular satoshis will be tweaked.
     #[clap(long)]
     pub drain_tweaked_satoshis: bool,
-    #[clap(flatten)]
-    pub rpc_args: RpcArgs,
 }
 
 pub async fn run(
@@ -42,7 +37,6 @@ pub async fn run(
         amounts,
         recipients,
         satoshis,
-        rpc_args,
         do_not_provide_proofs,
         drain_tweaked_satoshis,
     }: IssueArgs,
@@ -56,9 +50,6 @@ pub async fn run(
 
     let wallet = ctx.wallet().await?;
     let blockchain = ctx.blockchain()?;
-    let bitcoin_client = ctx
-        .bitcoin_client(rpc_args.rpc_url, rpc_args.rpc_auth, None)
-        .await?;
     let cfg = ctx.config()?;
 
     let tx = {
@@ -76,20 +67,14 @@ pub async fn run(
     };
 
     let tx_type = tx.tx_type.clone();
-    let txid = bitcoin_client
-        .send_raw_transaction_opts(
-            &tx.bitcoin_tx,
-            None,
-            Some(Amount::from_sat(DEFAULT_SATOSHIS).to_btc()),
-        )
-        .await?;
+    blockchain.broadcast(&tx.bitcoin_tx)?;
     if !do_not_provide_proofs {
         let client = ctx.yuv_client()?;
 
         client.provide_yuv_proof(tx.clone()).await?;
     }
 
-    println!("tx id: {}", txid);
+    println!("tx id: {}", tx.bitcoin_tx.txid());
     println!("{}", serde_yaml::to_string(&tx_type)?);
 
     Ok(())

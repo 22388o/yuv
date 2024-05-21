@@ -8,23 +8,18 @@ use event_bus::{typeid, EventBus};
 use eyre::WrapErr;
 use tokio_util::sync::CancellationToken;
 
-use yuv_storage::{ChromaInfoStorage, FrozenTxsStorage, PagesStorage, TransactionsStorage};
-use yuv_types::announcements::{ChromaAnnouncement, FreezeAnnouncement, IssueAnnouncement};
-use yuv_types::{
-    Announcement, ControllerMessage, GraphBuilderMessage, ProofMap, YuvTransaction, YuvTxType,
-};
+use yuv_storage::{PagesStorage, TransactionsStorage};
+
+use yuv_types::{ControllerMessage, GraphBuilderMessage, ProofMap, YuvTransaction, YuvTxType};
 
 /// Service which handles attaching of transactions to the graph.
 ///
 /// Accepts batches of checked transactions, and attaches
 /// history of transactions, and if all dependencies (parents) are attached,
 /// then marks transaction as attached, and stores it in [`TransactionsStorage`].
-pub struct GraphBuilder<TransactionStorage, StateStorage> {
+pub struct GraphBuilder<TransactionStorage> {
     /// Storage of transactions, where attached transactions are stored.
     tx_storage: TransactionStorage,
-
-    /// A storage for state of the node.
-    state_storage: StateStorage,
 
     /// Event bus for simplifying communication with services.
     event_bus: EventBus,
@@ -56,17 +51,11 @@ pub struct GraphBuilder<TransactionStorage, StateStorage> {
 const DURATION_ONE_HOUR: Duration = Duration::from_secs(60 * 60);
 const DURATION_ONE_DAY: Duration = Duration::from_secs(60 * 60 * 24);
 
-impl<TS, SS> GraphBuilder<TS, SS>
+impl<TS> GraphBuilder<TS>
 where
     TS: TransactionsStorage + PagesStorage + Send + Sync + 'static,
-    SS: FrozenTxsStorage + ChromaInfoStorage + Send + Sync + 'static,
 {
-    pub fn new(
-        tx_storage: TS,
-        state_storage: SS,
-        full_event_bus: &EventBus,
-        tx_per_page: u64,
-    ) -> Self {
+    pub fn new(tx_storage: TS, full_event_bus: &EventBus, tx_per_page: u64) -> Self {
         let event_bus = full_event_bus
             .extract(&typeid![ControllerMessage], &typeid![GraphBuilderMessage])
             .expect("event channels must be presented");
@@ -74,7 +63,6 @@ where
         Self {
             tx_storage,
             event_bus,
-            state_storage,
             inverse_deps: Default::default(),
             deps: Default::default(),
             stored_txs: Default::default(),
@@ -225,16 +213,8 @@ where
             let child_id = yuv_tx.bitcoin_tx.txid();
 
             match &yuv_tx.tx_type {
-                // if issuance or freeze is attached, there is no reason to wait for it's parents.
-                YuvTxType::Issue { announcement, .. } => {
-                    let announcement_tx = YuvTransaction {
-                        bitcoin_tx: yuv_tx.bitcoin_tx.clone(),
-                        tx_type: YuvTxType::Announcement(Announcement::Issue(announcement.clone())),
-                    };
-
-                    self.set_tx_attached(announcement_tx, &mut attached_txs)
-                        .await?;
-
+                // if issuance is attached, there is no reason to wait for it's parents.
+                YuvTxType::Issue { .. } => {
                     self.set_tx_attached(yuv_tx.clone(), &mut attached_txs)
                         .await?;
 
@@ -244,10 +224,6 @@ where
 
                     // Add to queue for next iteration of graph builder.
                     queued_txs.extend(ids);
-                }
-                YuvTxType::Announcement(_) => {
-                    self.set_tx_attached(yuv_tx.clone(), &mut attached_txs)
-                        .await?;
                 }
                 YuvTxType::Transfer { input_proofs, .. } => {
                     self.handle_transfer(
@@ -260,6 +236,8 @@ where
                     .await
                     .wrap_err("Failed handling of transfer")?;
                 }
+                // Skip storing inv for announcement transactions (as they are not broadcasted via P2P).
+                YuvTxType::Announcement { .. } => {}
             }
         }
 
@@ -469,119 +447,10 @@ where
 
         self.tx_storage.put_yuv_tx(tx.clone()).await?;
 
-        // Skip storing inv for announcement transactions (as they are not broadcasted via P2P).
-        if let YuvTxType::Announcement(announcement) = &tx.tx_type {
-            self.handle_announcement(txid, announcement).await?;
-
-            return Ok(());
-        }
-
         tracing::info!("Tx {txid} is attached");
 
         // Add to inventory only if it's not a freeze transaction.
         attached_txs.push(txid);
-
-        Ok(())
-    }
-
-    async fn handle_announcement(
-        &self,
-        txid: Txid,
-        announcement: &Announcement,
-    ) -> eyre::Result<()> {
-        use Announcement as AM;
-
-        match announcement {
-            AM::Chroma(announcement) => self.add_chroma_announcements(announcement).await?,
-            AM::Freeze(freeze) => self.update_freezes(txid, freeze).await?,
-            AM::Issue(issue) => self.update_supply(issue).await?,
-        }
-
-        tracing::info!("{announcement} in tx {txid} is handled");
-
-        Ok(())
-    }
-
-    /// Update chroma announcements in storage.
-    async fn add_chroma_announcements(
-        &self,
-        announcement: &ChromaAnnouncement,
-    ) -> eyre::Result<()> {
-        if let Some(chroma_info) = self
-            .state_storage
-            .get_chroma_info(&announcement.chroma)
-            .await?
-        {
-            if chroma_info.announcement.is_some() {
-                tracing::debug!(
-                    "Chroma announcement for Chroma {} already exist",
-                    announcement.chroma
-                );
-
-                return Ok(());
-            } else {
-                self.state_storage
-                    .put_chroma_info(
-                        &announcement.chroma,
-                        Some(announcement.clone()),
-                        chroma_info.total_supply,
-                    )
-                    .await?;
-            }
-        } else {
-            self.state_storage
-                .put_chroma_info(&announcement.chroma, Some(announcement.clone()), 0)
-                .await?;
-        };
-
-        tracing::debug!(
-            "Chroma announcement for Chroma {} is added",
-            announcement.chroma
-        );
-
-        Ok(())
-    }
-
-    /// For each freeze toggle, update entry in freeze state storage.
-    async fn update_freezes(&self, txid: Txid, freeze: &FreezeAnnouncement) -> eyre::Result<()> {
-        let freeze_outpoint = &freeze.freeze_outpoint();
-
-        let mut freeze_entry = self
-            .state_storage
-            .get_frozen_tx(freeze_outpoint)
-            .await?
-            .unwrap_or_default();
-
-        freeze_entry.tx_ids.push(txid);
-
-        tracing::debug!(
-            "Freeze toggle for txid={} vout={} is set to {:?}",
-            freeze.freeze_txid(),
-            freeze_outpoint,
-            freeze_entry.tx_ids,
-        );
-
-        self.state_storage
-            .put_frozen_tx(freeze_outpoint, freeze_entry.tx_ids)
-            .await?;
-
-        Ok(())
-    }
-
-    async fn update_supply(&self, issue: &IssueAnnouncement) -> eyre::Result<()> {
-        if let Some(chroma_info) = self.state_storage.get_chroma_info(&issue.chroma).await? {
-            self.state_storage
-                .put_chroma_info(
-                    &issue.chroma,
-                    chroma_info.announcement,
-                    chroma_info.total_supply + issue.amount,
-                )
-                .await?;
-        } else {
-            self.state_storage
-                .put_chroma_info(&issue.chroma, None, issue.amount)
-                .await?;
-        };
 
         Ok(())
     }
@@ -624,8 +493,7 @@ mod tests {
         event_bus.register::<GraphBuilderMessage>(Some(100));
         event_bus.register::<ControllerMessage>(Some(100));
 
-        let mut graph_builder =
-            GraphBuilder::<_, _>::new(storage.clone(), storage.clone(), &event_bus, TX_PER_PAGE);
+        let mut graph_builder = GraphBuilder::<_>::new(storage.clone(), &event_bus, TX_PER_PAGE);
 
         let tx1 = YuvTransaction {
             bitcoin_tx: Transaction {
@@ -826,8 +694,7 @@ mod tests {
         event_bus.register::<GraphBuilderMessage>(Some(100));
         event_bus.register::<ControllerMessage>(Some(100));
 
-        let graph_builder =
-            GraphBuilder::new(storage.clone(), storage.clone(), &event_bus, TX_PER_PAGE);
+        let graph_builder = GraphBuilder::new(storage.clone(), &event_bus, TX_PER_PAGE);
 
         let mut graph_builder = graph_builder
             .with_cleanup_period(Duration::from_secs(0))

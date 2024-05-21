@@ -2,12 +2,13 @@
 use std::{borrow::Cow, collections::HashSet, fmt, net, net::SocketAddr, sync::Arc};
 
 use async_trait::async_trait;
-use bitcoin::{locktime::Height, network::constants::ServiceFlags, network::Address, Network};
+use bitcoin::{locktime::Height, network::constants::ServiceFlags, network::Address};
 use flume as chan;
 use tracing::{debug, trace};
 
 use event_bus::{typeid, EventBus};
 use yuv_types::messages::p2p::{Inventory, NetworkMessage, RawNetworkMessage};
+use yuv_types::network::Network;
 use yuv_types::{ControllerMessage, ControllerP2PMessage, YuvTransaction};
 
 use crate::fsm::output::Outbox;

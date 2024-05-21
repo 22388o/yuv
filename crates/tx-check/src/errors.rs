@@ -91,8 +91,4 @@ pub enum TxCheckerError {
 
     #[error("Connection error: {0}")]
     Connection(#[from] bitcoin_client::Error),
-
-    /// Got from node and received transactions are not the same
-    #[error("Transaction mismatch")]
-    TransactionMismatch,
 }

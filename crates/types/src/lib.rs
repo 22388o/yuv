@@ -6,8 +6,8 @@ extern crate core;
 pub use announcements::{Announcement, AnyAnnouncement};
 #[cfg(all(feature = "messages", feature = "std"))]
 pub use messages::{
-    ConfirmationIndexerMessage, ControllerMessage, ControllerP2PMessage, GraphBuilderMessage,
-    TxCheckerMessage,
+    ControllerMessage, ControllerP2PMessage, GraphBuilderMessage, TxCheckerMessage,
+    TxConfirmMessage,
 };
 pub use proofs::{ProofMap, TransferProofs};
 pub use transactions::{YuvTransaction, YuvTxType};
@@ -16,6 +16,7 @@ pub use transactions::{YuvTransaction, YuvTxType};
 compile_error!("at least one of the `std` or `no-std` features must be enabled");
 
 pub mod announcements;
+pub mod network;
 mod transactions;
 
 #[cfg(feature = "consensus")]

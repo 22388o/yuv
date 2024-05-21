@@ -3,6 +3,7 @@ mod actions;
 mod arguments;
 mod e2e;
 mod faucet;
+mod miner;
 mod tx_checker;
 use clap::Parser;
 

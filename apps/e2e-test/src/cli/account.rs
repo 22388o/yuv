@@ -39,7 +39,7 @@ const ISSUE_AMOUNT: u128 = TRANSFER_LOWER_BOUND * 2u128.pow(TRANFERS_PER_ISSUANC
 /// Amount of satoshis to put into each YUV output.
 const SATOSHIS_AMOUNT: u64 = 1000;
 
-const ERROR_SLEEP_DURATION: Duration = Duration::from_secs(10);
+const ERROR_SLEEP_DURATION: Duration = Duration::from_secs(1);
 const CANCELLATION_DURATION: Duration = Duration::from_secs(5);
 const TX_SENDING_INTERVAL: Duration = Duration::from_secs(1);
 
@@ -74,7 +74,7 @@ impl Account {
 
     /// Start sending transactions.
     pub async fn run(
-        mut self,
+        self,
         recipients: Arc<[PrivateKey]>,
         tx_sender: UnboundedSender<YuvTransaction>,
         balance_sender: UnboundedSender<(PrivateKey, HashMap<Chroma, u128>)>,
@@ -89,10 +89,7 @@ impl Account {
                 _ = timer.tick() => {},
                 // If a cancellation is received, stop sending transaction and send the balances to the `tx-checker`.
                 _ = cancellation_token.cancelled() => {
-                    debug!("cancellation received, sending balances to the Tx checker and stopping sending transactions");
-                    tokio::time::sleep(CANCELLATION_DURATION).await;
-
-                    self.send_balances(balance_sender).await?;
+                    self.finish(balance_sender).await?;
                     return Ok(());
                 }
             }
@@ -125,6 +122,16 @@ impl Account {
 
             warn!("Mempool conflict | Txid: {}", txid);
         }
+    }
+
+    async fn finish(
+        mut self,
+        balance_sender: UnboundedSender<(PrivateKey, HashMap<Chroma, u128>)>,
+    ) -> eyre::Result<()> {
+        debug!("Finished sending transactions, sending balances to the Tx checker and stopping");
+        tokio::time::sleep(CANCELLATION_DURATION).await;
+
+        self.send_balances(balance_sender).await
     }
 
     /// Builds a random YUV transaction.
@@ -168,7 +175,8 @@ impl Account {
                 ISSUE_AMOUNT,
                 SATOSHIS_AMOUNT,
             )
-            .set_fee_rate_strategy(FEE_RATE_STARTEGY);
+            .set_fee_rate_strategy(FEE_RATE_STARTEGY)
+            .set_drain_tweaked_satoshis(true);
 
         match &self.rpc_blockchain {
             Some(bc) => builder.finish(bc).await,
@@ -198,7 +206,8 @@ impl Account {
                 amount,
                 SATOSHIS_AMOUNT,
             )
-            .set_fee_rate_strategy(FEE_RATE_STARTEGY);
+            .set_fee_rate_strategy(FEE_RATE_STARTEGY)
+            .set_drain_tweaked_satoshis(true);
 
         match &self.rpc_blockchain {
             Some(bc) => builder.finish(bc).await,

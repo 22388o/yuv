@@ -12,5 +12,7 @@ pub use worker::{Config, TxCheckerWorker};
 mod worker_pool;
 pub use worker_pool::TxCheckerWorkerPool;
 
+mod announcements;
+
 #[cfg(test)]
 mod tests;

@@ -20,6 +20,7 @@ use bdk::{
     wallet::tx_builder::TxOrdering,
     FeeRate as BdkFeeRate, SignOptions,
 };
+
 #[cfg(feature = "bulletproof")]
 use yuv_pixels::{k256::ProjectivePoint, Luma, RangeProof};
 use yuv_pixels::{
@@ -1019,7 +1020,7 @@ where
         if self.is_issuance {
             let announcement = form_issue_announcement(output_proofs.clone())?;
 
-            tx_builder.add_recipient(announcement.to_script(), 1000);
+            tx_builder.add_recipient(announcement.to_script(), 0);
         }
         // Fill tx_builder with formed inputs and outputs
         for (script_pubkey, amount) in outputs {
@@ -1037,7 +1038,7 @@ where
 
         let tx_type = form_tx_type(
             &psbt.unsigned_tx,
-            input_proofs,
+            &input_proofs,
             &output_proofs,
             self.is_issuance,
         )?;
@@ -1052,10 +1053,21 @@ where
             },
         )?;
 
-        // We need to sign inputs only in case of transfer transaction as there
-        // is no inputs in issuance transaction.
+        // We need to sign inputs in case of transfer transaction as there are always YUV inputs.
+        // We also need to sign issue transaction inputs if it spends tweaked satoshis.
         if let YuvTxType::Transfer { input_proofs, .. } = &tx_type {
             self.tx_signer.sign(&mut psbt, input_proofs)?;
+        } else if let YuvTxType::Issue { .. } = &tx_type {
+            // Offset is basically the number of regular Bitcoin inputs that we need to skip
+            // while constructing input proofs.
+            let offset = psbt.inputs.len() - self.inputs.len();
+            let input_proofs: ProofMap = input_proofs
+                .into_values()
+                .enumerate()
+                .map(|(index, proof)| ((index + offset) as u32, proof))
+                .collect();
+
+            self.tx_signer.sign(&mut psbt, &input_proofs)?;
         }
 
         let tx = psbt.extract_tx();
@@ -1328,7 +1340,7 @@ fn get_empty_pixel_proof(recipient: secp256k1::PublicKey) -> eyre::Result<(Pixel
 
 fn form_tx_type(
     unsigned_tx: &Transaction,
-    input_proofs: HashMap<OutPoint, PixelProof>,
+    input_proofs: &HashMap<OutPoint, PixelProof>,
     output_proofs: &[PixelProof],
     is_issuance: bool,
 ) -> eyre::Result<YuvTxType> {
