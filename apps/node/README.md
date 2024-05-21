@@ -12,7 +12,7 @@ Setup configuration file for first node:
 # config-1.toml
 [p2p]
 address = "0.0.0.0:8002" # address on which node will listen p2p connections
-network = "regtest" # p2p network type, accepting values: mainnet, bitcoin, testnet, regtest, sigtest, mutiny
+network = "bitcoin" # p2p network type, accepting values: mainnet, bitcoin, testnet, regtest, sigtest, mutiny
 max_inbound_connections = 16 # maximum number of inbound connections
 max_outbound_connections = 8 # maximum number of outbound connections
 bootnodes = [] # list of ip addresses of nodes to connect
@@ -41,13 +41,13 @@ level = "INFO" # level logging, accepting values: TRACE, DEBUG, INFO, WARN, ERRO
 # Number of blocks to index again (subtract from height of last indexed block).
 index_step_back = 1
 # blockhash from which the indexer indexes blocks
-starting_block = "000000000000000000027e245190ea0b27c4eb344618816fbdd8b5eec8e234d3"
-polling_period = { secs = 5, nanos = 0 } # interval between indexer runs
+starting_block = "00000000000000000002fce7a657d75c48454774d9494fbbf3ce091ccc4261a7"
+polling_period = { secs = 20, nanos = 0 } # interval between indexer runs
 # max time after each transaction should be discarded from pool
 max_confirmation_time = { secs = 86400, nanos = 0 } 
 blockloader = { 
-    workers_number = 10, # number of workers which load blocks
-    buffer_size = 50, # Number of blocks that will be fetched by the block loader in each iteration
+    workers_number = 5, # number of workers which load blocks
+    buffer_size = 10, # Number of blocks that will be fetched by the block loader in each iteration
     worker_time_sleep = 3 # Sleep the worker for seconds when the worker exceeds the rate limit
 }
 
@@ -59,7 +59,7 @@ inv_sharing_interval = 10 # interval between inv messages
 And run:
 
 ``` sh
-cargo run -p yuv-node -- run --config ./config-1.toml
+cargo run -p yuvd -- run --config ./config-1.toml
 ```
 
 Setup configuration file for second node:
@@ -87,5 +87,5 @@ auth = { username = "admin1", password = "123" }
 And run:
 
 ``` sh
-cargo run -p yuv-node -- run --config ./config-2.toml
+cargo run -p yuvd -- run --config ./config-2.toml
 ```

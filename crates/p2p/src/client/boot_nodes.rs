@@ -8,12 +8,8 @@ use crate::common::peer::{KnownAddress, Source, Store};
 use super::peer::Cache;
 
 const TESTNET: &[&str] = &[];
-const MAINNET: &[&str] = &[
-    "http://54.219.77.43:8002"
-];
-const MUTINY: &[&str] = &[
-    "http://54.215.221.246:8002"
-];
+const MAINNET: &[&str] = &[];
+const MUTINY: &[&str] = &[];
 
 /// Update the list of peers with the hard coded boot nodes for the given [Network].
 pub(crate) fn insert_boot_nodes(peers: &mut Cache, network: Network) {
