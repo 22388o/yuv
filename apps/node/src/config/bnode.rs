@@ -1,5 +1,6 @@
 use bitcoin_client::BitcoinRpcAuth;
 use serde::Deserialize;
+use std::time::Duration;
 
 #[derive(Deserialize, Clone)]
 pub struct BitcoinConfig {
@@ -8,6 +9,9 @@ pub struct BitcoinConfig {
     /// Authentication for the bitcoin node
     #[serde(default)]
     pub auth: Option<BitcoinAuth>,
+    /// The timeout after which requests will abort if they aren't finished.
+    #[serde(default)]
+    pub timeout: Option<Duration>,
 }
 
 #[derive(Deserialize, Clone)]

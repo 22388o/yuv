@@ -32,7 +32,7 @@ const READ_TIMEOUT: time::Duration = time::Duration::from_secs(6);
 /// Maximum time to wait when writing to a socket.
 const WRITE_TIMEOUT: time::Duration = time::Duration::from_secs(3);
 /// Maximum amount of time to wait for i/o.
-const WAIT_TIMEOUT: LocalDuration = LocalDuration::from_mins(60);
+const WAIT_TIMEOUT: LocalDuration = LocalDuration::from_secs(5);
 /// Socket read buffer size.
 const READ_BUFFER_SIZE: usize = 1024 * 192;
 
@@ -334,20 +334,15 @@ impl<Id: PeerId + Send + Sync> Reactor<net::TcpStream, Id> {
         S::DisconnectReason: Into<Disconnect<S::DisconnectReason>> + Send + Sync,
     {
         tokio::task::yield_now().await;
-        let timeout = self
-            .timeouts
-            .next(SystemTime::now())
-            .unwrap_or(WAIT_TIMEOUT)
-            .into();
 
         trace!(
             "Polling {} source(s) and {} timeout(s), waking up in {:?}..",
             self.sources.len(),
             self.timeouts.len(),
-            timeout,
+            WAIT_TIMEOUT,
         );
 
-        let result = self.sources.wait_timeout(events, timeout); // Blocking.
+        let result = self.sources.wait_timeout(events, WAIT_TIMEOUT.into()); // Blocking.
         let local_time = SystemTime::now().into();
 
         service.tick(local_time);

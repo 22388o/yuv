@@ -15,6 +15,7 @@ bdk = { path = "../../crates/bdk", features = [
     "std",
     "use-esplora-blocking",
 ], default-features = false }
+bulletproof = { path = "../../crates/bulletproof" }
 yuv-types = { path = "../../crates/types" }
 yuv-pixels = { path = "../../crates/pixels" }
 yuv-tx-check = { path = "../../crates/tx-check" }
@@ -29,9 +30,9 @@ serde = { workspace = true }
 thiserror = { workspace = true }
 config = { workspace = true }
 
-indicatif = { version = "0.17.8" }
 serde_json = { version = "1.0" }
 serde_yaml = { version = "0.9.25" }
+indicatif = { version = "0.17.8" }
 toml = { version = "0.8.12" }
 color-eyre = { version = "0.6.2" }
 log = { version = "0.4.20" }

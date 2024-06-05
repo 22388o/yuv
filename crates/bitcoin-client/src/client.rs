@@ -1,12 +1,12 @@
 use async_trait::async_trait;
 use bitcoin::hashes::hex;
 use bitcoin::secp256k1;
-use jsonrpc_async as jsonrpc;
 use log::Level::{Debug, Trace, Warn};
 use log::{debug, log_enabled, trace};
 use serde::*;
 use std::fs::File;
 use std::path::PathBuf;
+use std::time::Duration;
 
 use crate::{BitcoinRpcApi, JsonRpcError};
 
@@ -60,13 +60,17 @@ impl Client {
     /// Creates a client to a bitcoind JSON-RPC server.
     ///
     /// Can only return [Err] when using cookie authentication.
-    pub async fn new(auth: Auth, url: String) -> Result<Self> {
-        let mut client = jsonrpc::simple_http::SimpleHttpTransport::builder()
+    pub async fn new(auth: Auth, url: String, timeout: Option<Duration>) -> Result<Self> {
+        let mut client = jsonrpc::http::reqwest_http::Builder::new()
             .url(&url)
-            .await
             .map_err(|e| Error::JsonRpc(e.into()))?;
+
         if let Some((user, pass)) = auth.get_user_pass()? {
             client = client.auth(user, Some(pass));
+        }
+
+        if let Some(timeout) = timeout {
+            client = client.timeout(timeout);
         }
 
         Ok(Self {
@@ -178,7 +182,7 @@ mod tests {
     #[tokio::test]
     async fn test_raw_tx() {
         use bitcoin::consensus::encode;
-        let client = Client::new(Auth::None, "http://localhost/".into())
+        let client = Client::new(Auth::None, "http://localhost/".into(), None)
             .await
             .unwrap();
         let tx: Transaction = encode::deserialize(&Vec::<u8>::from_hex("0200000001586bd02815cf5faabfec986a4e50d25dbee089bd2758621e61c5fab06c334af0000000006b483045022100e85425f6d7c589972ee061413bcf08dc8c8e589ce37b217535a42af924f0e4d602205c9ba9cb14ef15513c9d946fa1c4b797883e748e8c32171bdf6166583946e35c012103dae30a4d7870cd87b45dd53e6012f71318fdd059c1c2623b8cc73f8af287bb2dfeffffff021dc4260c010000001976a914f602e88b2b5901d8aab15ebe4a97cf92ec6e03b388ac00e1f505000000001976a914687ffeffe8cf4e4c038da46a9b1d37db385a472d88acfd211500").unwrap()).unwrap();

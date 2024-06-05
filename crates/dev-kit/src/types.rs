@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::convert::AsRef;
 use std::ops::Sub;
 
@@ -425,6 +426,23 @@ impl std::iter::Sum for Balance {
             |a, b| a + b,
         )
     }
+}
+
+/// YUV balances separated into various asset types.
+#[derive(Clone, Debug)]
+pub struct YuvBalances {
+    /// Regular YUV balances.
+    pub yuv: HashMap<Chroma, u128>,
+
+    /// Tweaked satoshis.
+    ///
+    /// They are the outcome of YUV transactions that contain outputs with no pixels,
+    /// i.e. `EmptyPixelProofs`.
+    pub tweaked_satoshis: u64,
+
+    #[cfg(feature = "bulletproof")]
+    /// Bulletproof YUV balances.
+    pub bulletproof: HashMap<Chroma, u128>,
 }
 
 #[cfg(test)]

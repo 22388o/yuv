@@ -10,9 +10,8 @@ use tracing::trace;
 use yuv_p2p::client::handle::Handle as ClientHandle;
 use yuv_storage::{InventoryStorage, TransactionsStorage, TxState, TxStatesStorage};
 use yuv_types::{
-    messages::{p2p::Inventory, TxsToConfirm},
-    Announcement, ControllerMessage, ControllerP2PMessage, TxConfirmMessage, YuvTransaction,
-    YuvTxType,
+    messages::p2p::Inventory, Announcement, ControllerMessage, ControllerP2PMessage,
+    TxConfirmMessage, YuvTransaction, YuvTxType,
 };
 
 /// Default inventory size.
@@ -150,10 +149,10 @@ where
                 .await
                 .wrap_err("failed to handle p2p event")?,
             Message::ConfirmBatchTx(txs) => self
-                .handle_yuv_txs(txs, None)
+                .handle_new_yuv_txs(txs, None)
                 .await
                 .wrap_err("failed to handle transaction to confirm")?,
-            Message::HandleAnnouncement(txid) => self.handle_announcement(txid).await,
+            Message::CheckedAnnouncement(txid) => self.handle_checked_announcement(txid).await,
         }
 
         Ok(())
@@ -171,7 +170,7 @@ where
                 .await
                 .wrap_err("failed to handle inbound get data")?,
             ControllerP2PMessage::YuvTx { txs, sender } => self
-                .handle_yuv_txs(txs, Some(sender))
+                .handle_new_yuv_txs(txs, Some(sender))
                 .await
                 .wrap_err("failed to handle yuv txs")?,
         };
@@ -290,7 +289,7 @@ where
 
     /// Handles yuv txs from the network. It checks if the transaction is already handled. If
     /// not, it sends the transaction to the `TxChecker`.
-    async fn handle_yuv_txs(
+    async fn handle_new_yuv_txs(
         &mut self,
         yuv_txs: Vec<YuvTransaction>,
         sender: Option<SocketAddr>,
@@ -310,7 +309,7 @@ where
                     .insert_if_not_exists(tx_id, TxState::Pending)
                     .await;
 
-                tracing::debug!("added pending tx to the state storage: {}", tx_id);
+                tracing::debug!("Added pending tx to the state storage: {}", tx_id);
 
                 new_txs.push(yuv_tx);
                 continue;
@@ -326,9 +325,7 @@ where
             }
 
             self.event_bus
-                .send(TxConfirmMessage::ConfirmBatchTx(TxsToConfirm::YuvTxs(
-                    new_txs,
-                )))
+                .send(TxConfirmMessage::TxsToConfirm(new_txs))
                 .await;
         }
 
@@ -360,7 +357,7 @@ where
     }
 
     /// Handles checked announcement. It removes it from the handling_txs list.
-    pub async fn handle_announcement(&mut self, txid: Txid) {
+    pub async fn handle_checked_announcement(&mut self, txid: Txid) {
         self.handling_txs.remove(&txid).await;
 
         tracing::info!("Announcement {} is handled", txid);
@@ -404,6 +401,7 @@ where
             if let YuvTxType::Announcement(Announcement::Issue { .. }) = yuv_tx.tx_type {
                 return Ok(false);
             }
+
             return Ok(true);
         }
 

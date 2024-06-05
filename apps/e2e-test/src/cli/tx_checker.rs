@@ -289,9 +289,9 @@ impl TxChecker {
         };
 
         let mut mismatches = 1;
-        for (chroma, actual_amount) in actual_balances {
-            if let Some(expected_amount) = expected_balances.get(&chroma) {
-                if actual_amount == *expected_amount {
+        for (chroma, actual_amount) in actual_balances.iter() {
+            if let Some(expected_amount) = expected_balances.get(chroma) {
+                if actual_amount == expected_amount {
                     continue;
                 }
 

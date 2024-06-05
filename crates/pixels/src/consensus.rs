@@ -2,7 +2,15 @@ use alloc::vec::Vec;
 use core2::io;
 
 #[cfg(feature = "bulletproof")]
-use alloc::boxed::Box;
+use {
+    crate::Bulletproof,
+    alloc::boxed::Box,
+    bitcoin::secp256k1::constants::SCHNORR_SIGNATURE_SIZE,
+    bulletproof::{
+        k256::{elliptic_curve::group::GroupEncoding, ProjectivePoint},
+        RangeProof,
+    },
+};
 
 use bitcoin::{
     consensus::{encode::Error as EncodeError, Decodable, Encodable},
@@ -11,14 +19,6 @@ use bitcoin::{
     secp256k1::{self, constants::PUBLIC_KEY_SIZE},
 };
 
-#[cfg(feature = "bulletproof")]
-use bulletproof::{
-    k256::{elliptic_curve::group::GroupEncoding, ProjectivePoint},
-    RangeProof,
-};
-
-#[cfg(feature = "bulletproof")]
-use crate::Bulletproof;
 use crate::{
     proof::{
         htlc::{HtlcScriptKind, LightningHtlcData, LightningHtlcProof},
@@ -139,12 +139,16 @@ impl Encodable for Bulletproof {
 
         len += writer.write(&self.inner_key.serialize())?;
 
+        len += writer.write(&self.sender_key.serialize())?;
+
         let commitment_bytes = self.commitment.to_bytes();
         len += commitment_bytes.to_vec().consensus_encode(writer)?;
 
-        len += writer.write(&self.commiter.serialize())?;
-
         len += self.proof.to_bytes().consensus_encode(writer)?;
+
+        len += writer.write(self.signature.as_ref())?;
+
+        len += writer.write(self.chroma_signature.as_ref())?;
 
         Ok(len)
     }
@@ -159,24 +163,36 @@ impl Decodable for Bulletproof {
         reader.read_exact(&mut bytes)?;
         let inner_key = secp256k1::PublicKey::deserialize(&bytes)?;
 
+        let mut bytes = [0u8; PUBLIC_KEY_SIZE];
+        reader.read_exact(&mut bytes)?;
+        let sender_key = secp256k1::PublicKey::deserialize(&bytes)?;
+
         let commitment_bytes: Vec<u8> = Decodable::consensus_decode(reader)?;
         let commitment: Option<ProjectivePoint> =
             ProjectivePoint::from_bytes(commitment_bytes.as_slice().into()).into();
-
-        let mut bytes = [0u8; PUBLIC_KEY_SIZE];
-        reader.read_exact(&mut bytes)?;
-        let commiter = secp256k1::PublicKey::deserialize(&bytes)?;
 
         let bytes: Vec<u8> = Decodable::consensus_decode(reader)?;
         let proof: RangeProof = RangeProof::from_bytes(bytes.as_slice())
             .ok_or_else(|| EncodeError::ParseFailed("Failed to parse the range proof"))?;
 
+        let mut bytes = [0u8; SCHNORR_SIGNATURE_SIZE];
+        reader.read_exact(&mut bytes)?;
+        let signature = bitcoin::secp256k1::schnorr::Signature::from_slice(&bytes)
+            .map_err(|_e| EncodeError::ParseFailed("Failed to parse the signature"))?;
+
+        let mut bytes = [0u8; SCHNORR_SIGNATURE_SIZE];
+        reader.read_exact(&mut bytes)?;
+        let chroma_signature = bitcoin::secp256k1::schnorr::Signature::from_slice(&bytes)
+            .map_err(|_e| EncodeError::ParseFailed("Failed to parse the chroma signature"))?;
+
         Ok(Bulletproof::new(
             pixel,
             inner_key,
+            sender_key,
             commitment.ok_or_else(|| EncodeError::ParseFailed("Failed to parse the commitment"))?,
-            commiter,
             proof,
+            signature,
+            chroma_signature,
         ))
     }
 }
@@ -418,6 +434,8 @@ mod tests {
     use crate::Pixel;
     use crate::PixelProof;
     use crate::SigPixelProof;
+    #[cfg(feature = "bulletproof")]
+    use bitcoin::secp256k1::schnorr::Signature;
 
     static X_ONLY_PUBKEY: Lazy<XOnlyPublicKey> = Lazy::new(|| {
         XOnlyPublicKey::from_str("0677b5829356bb5e0c0808478ac150a500ceab4894d09854b0f75fbe7b4162f8")
@@ -433,6 +451,12 @@ mod tests {
 
     static HASH: Lazy<hash160::Hash> =
         Lazy::new(|| hash160::Hash::from_str("321ac998e78433e57a85171aa77bfad1d205ee3d").unwrap());
+
+    #[cfg(feature = "bulletproof")]
+    static SIG: Lazy<Signature> = Lazy::new(|| {
+        Signature::from_str("32445f89b0fefe7dac06c6716c926ccd603cec8dd365a14ecb190a035617ec2700f0adad05e0d9912fb2eeaa336afd76fd752a1842c66d556d82f9f8c6e504aa")
+            .unwrap()
+    });
 
     #[cfg(feature = "bulletproof")]
     const BLINDING: [u8; 32] = [
@@ -551,7 +575,7 @@ mod tests {
 
         let (range_proof, point) = bulletproof::generate(100, BLINDING);
 
-        let proof = Bulletproof::new(pixel, *PUBKEY, point, *PUBKEY, range_proof);
+        let proof = Bulletproof::new(pixel, *PUBKEY, *PUBKEY, point, range_proof, *SIG, *SIG);
 
         let mut bytes = Vec::new();
 
@@ -573,41 +597,43 @@ mod tests {
         let chroma = Chroma::new(*X_ONLY_PUBKEY);
         let pixel = Pixel::new(100, chroma);
 
-        let mut proofs: Vec<PixelProof> = Vec::new();
-
-        proofs.push(PixelProof::Sig(SigPixelProof::new(pixel, *PUBKEY)));
-        proofs.push(PixelProof::Multisig(MultisigPixelProof::new(
-            pixel,
-            vec![*PUBKEY, *PUBKEY, *PUBKEY],
-            2,
-        )));
-        proofs.push(PixelProof::Lightning(LightningCommitmentProof {
-            pixel,
-            revocation_pubkey: *PUBKEY,
-            to_self_delay: 100,
-            local_delayed_pubkey: *PUBKEY,
-        }));
-        proofs.push(PixelProof::LightningHtlc(LightningHtlcProof::new(
-            pixel,
-            LightningHtlcData::new(
-                *HASH,
-                *PUBKEY,
-                *PUBKEY,
-                *HASH,
-                htlc::HtlcScriptKind::Received { cltv_expiry: 100 },
-            ),
-        )));
-
         #[cfg(feature = "bulletproof")]
         let (range_proof, point) = bulletproof::generate(100, BLINDING);
-        #[cfg(feature = "bulletproof")]
-        proofs.push(PixelProof::Bulletproof(Box::new(Bulletproof::new(
-            pixel,
-            *PUBKEY,
-            point,
-            *PUBKEY,
-            range_proof,
-        ))));
+
+        let proofs: Vec<PixelProof> = vec![
+            PixelProof::Sig(SigPixelProof::new(pixel, *PUBKEY)),
+            PixelProof::Multisig(MultisigPixelProof::new(
+                pixel,
+                vec![*PUBKEY, *PUBKEY, *PUBKEY],
+                2,
+            )),
+            PixelProof::Lightning(LightningCommitmentProof {
+                pixel,
+                revocation_pubkey: *PUBKEY,
+                to_self_delay: 100,
+                local_delayed_pubkey: *PUBKEY,
+            }),
+            PixelProof::LightningHtlc(LightningHtlcProof::new(
+                pixel,
+                LightningHtlcData::new(
+                    *HASH,
+                    *PUBKEY,
+                    *PUBKEY,
+                    *HASH,
+                    htlc::HtlcScriptKind::Received { cltv_expiry: 100 },
+                ),
+            )),
+            #[cfg(feature = "bulletproof")]
+            PixelProof::Bulletproof(Box::new(Bulletproof::new(
+                pixel,
+                *PUBKEY,
+                *PUBKEY,
+                point,
+                range_proof,
+                *SIG,
+                *SIG,
+            ))),
+        ];
 
         for proof in &proofs {
             let mut bytes = Vec::new();

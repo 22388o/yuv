@@ -4,9 +4,6 @@
 mod params;
 pub use params::{IndexingParams, RunParams};
 
-#[cfg(test)]
-mod tests;
-
 mod indexer;
 pub use indexer::BitcoinBlockIndexer;
 

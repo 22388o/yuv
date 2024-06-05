@@ -10,6 +10,6 @@ pub use rpc_api::MockRpcApi;
 pub mod json;
 mod queryable;
 
-pub use jsonrpc_async::Error as JsonRpcError;
+pub use jsonrpc::Error as JsonRpcError;
 
 pub mod constants;

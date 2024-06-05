@@ -18,7 +18,9 @@ use yuv_types::{
 };
 
 use crate::errors::CheckError;
-use crate::transaction::{check_issue_isolated, check_transfer_isolated, find_issuer_in_txinputs};
+use crate::isolated_checks::{
+    check_issue_isolated, check_transfer_isolated, find_issuer_in_txinputs,
+};
 
 pub struct Config<TxsStorage, StateStorage> {
     pub full_event_bus: EventBus,
@@ -360,7 +362,7 @@ where
         };
 
         self.event_bus
-            .send(ControllerMessage::HandleAnnouncement(tx.bitcoin_tx.txid()))
+            .send(ControllerMessage::CheckedAnnouncement(tx.bitcoin_tx.txid()))
             .await;
 
         if !is_checked {
@@ -502,8 +504,10 @@ where
     /// Check that [IssueAnnouncement] is valid.
     ///
     /// The issue announcement is considered valid if:
-    /// 1. One of the inputs of the issue announcement transaction is signed by the issuer of the chroma.
-    /// 2. Issue amount doesn't exceed the max supply specified in the chroma announcement (if announced).
+    /// 1. One of the inputs of the issue announcement transaction is signed by the issuer of the
+    /// chroma.
+    /// 2. Issue amount doesn't exceed the max supply specified in the chroma announcement (if
+    /// announced).
     async fn check_issue_announcement(
         &self,
         announcement_yuv_tx: &YuvTransaction,
@@ -513,12 +517,12 @@ where
         let chroma = &announcement.chroma;
         let issue_amount = announcement.amount;
 
-        if self
+        let is_tx_already_exists = self
             .txs_storage
             .get_yuv_tx(&announcement_tx.txid())
             .await?
-            .is_some()
-        {
+            .is_some();
+        if is_tx_already_exists {
             return Ok(true);
         }
 
@@ -532,8 +536,17 @@ where
             return Ok(false);
         }
 
-        let chroma_info_opt = self.state_storage.get_chroma_info(chroma).await?;
+        // Bulletproof issuance announcements don't update the total supply so they can be skipped.
+        // Non-bulletproof issuance must be checked.
+        #[cfg(feature = "bulletproof")]
+        if announcement_yuv_tx.is_bulletproof() {
+            self.handle_checked_issue_announcement(announcement_yuv_tx, announcement)
+                .await?;
 
+            return Ok(true);
+        }
+
+        let chroma_info_opt = self.state_storage.get_chroma_info(chroma).await?;
         if let Some(ChromaInfo {
             announcement: Some(ChromaAnnouncement { max_supply, .. }),
             total_supply,
@@ -555,12 +568,23 @@ where
             }
         }
 
+        self.handle_checked_issue_announcement(announcement_yuv_tx, announcement)
+            .await?;
+
+        Ok(true)
+    }
+
+    async fn handle_checked_issue_announcement(
+        &self,
+        announcement_yuv_tx: &YuvTransaction,
+        announcement: &IssueAnnouncement,
+    ) -> Result<()> {
         self.update_supply(announcement).await?;
         self.txs_storage
             .put_yuv_tx(announcement_yuv_tx.clone())
             .await?;
 
-        Ok(true)
+        Ok(())
     }
 }
 

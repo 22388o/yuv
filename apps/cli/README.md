@@ -700,12 +700,16 @@ RESULT:
 
 #### 8. Bulletproofs
 
-Bulletproofs are used to prove that the value is in some range without revealing it
+Bulletproof transactions are meant to be used to send anonymous transactions, i.e. transactions with hidden amounts.
 
-Let's start with the issuance of 10000 **USD** tokens for **Alice**:
+> **_NOTE:_** Chromas and recipients are still visible to everyone. Only amounts are hidden.
+
+Only those tokens that were issued using bulletproofs can be transfered anonymously.
+
+Let's start with the bulletproof issuance of 10000 **USD** tokens for **Alice**:
 
 ```sh
-export ISSUANCE_TX_ID=$(yuv-cli --config ./usd.toml bulletproof issue --satoshis 10000 --value 10000 --recipient $ALICE)
+export ISSUANCE_TX_ID=$(yuv-cli --config ./usd.toml bulletproof issue --satoshis 10000 --amount 10000 --recipient $ALICE)
 ```
 
 Generate block using `nigiri`:
@@ -717,14 +721,17 @@ nigiri rpc --generate 1
 Let's check that Pedersen's commitment to the issuance bulletproof that we received is valid:
 
 ```sh
-yuv-cli --config ./alice.toml bulletproof check --value 10000 --tx-id $ISSUANCE_TX_ID --tx-vout 0 --sender $USD
+yuv-cli --config ./alice.toml bulletproof check --amount 10000 --outpoint $ISSUANCE_TX_ID:0 --sender $USD
 ```
 
-Now, let's transfer 1000 **USD** tokens from **Alice** to **Bob**:
+Now, let's transfer 1000 **USD** tokens from **Alice** to **Bob**.
+For that, we are passing the outpoint of the issuance we sent earlier:
 
 ```sh
-export TRANSFER_TX_ID=$(yuv-cli --config alice.dev.toml bulletproof transfer --value 1000 --residual 9000 --satoshis 2000 --residual-satoshis 7000 --chroma $USD --recipient $BOB --input-tx-id $ISSUANCE_TX_ID --input-tx-vout 0)
+export TRANSFER_TX_ID=$(yuv-cli --config alice.dev.toml bulletproof transfer --amount 1000 --residual 9000 --satoshis 2000 --residual-satoshis 7000 --chroma $USD --recipient $BOB --outpoint $ISSUANCE_TX_ID:0)
 ```
+
+> **_NOTE:_** if you intend to send the transfer without change, just set `residual` and `residual-satoshis` to `0`.
 
 Generate block using `nigiri`:
 
@@ -735,8 +742,10 @@ nigiri rpc --generate 1
 Finally check that Pedersen's commitment to the transfer bulletproof that we received is valid:
 
 ```sh
-yuv-cli --config ./bob.toml bulletproof check --value 1000 --tx-id $TRANSFER_TX_ID --tx-vout 0 --sender $ALICE
+yuv-cli --config ./bob.toml bulletproof check --amount 1000 --tx $TRANSFER_TX_ID:0 --sender $ALICE
 ```
+
+> **_NOTE:_** multichromatic bulletproof transfers are supported too.
 
 [step 1]: #1-synchronize-the-wallet-history
 

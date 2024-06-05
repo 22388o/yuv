@@ -28,10 +28,7 @@ use crate::{
 pub type PeerId = net::SocketAddr;
 
 /// Peer-to-peer protocol version.
-pub const PROTOCOL_VERSION: u32 = 70016;
-/// Minimum supported peer protocol version.
-/// This version includes support for the `sendheaders` feature.
-pub const MIN_PROTOCOL_VERSION: u32 = 70012;
+pub const PROTOCOL_VERSION: u32 = 100000;
 /// User agent included in `version` messages.
 pub const USER_AGENT: &str = "/yuv/0.1.0/";
 

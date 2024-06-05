@@ -7,7 +7,7 @@ license.workspace = true
 repository.workspace = true
 
 [features]
-bulletproof = ["dep:k256", "yuv-pixels/bulletproof"]
+bulletproof = ["dep:k256", "yuv-pixels/bulletproof", "yuv-types/bulletproof"]
 
 [dependencies]
 event-bus = { path = "../event-bus" }

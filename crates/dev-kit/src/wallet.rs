@@ -33,8 +33,11 @@ use crate::{
     bitcoin_provider::{BitcoinProvider, BitcoinProviderConfig, TxOutputStatus},
     database::wrapper::DatabaseWrapper,
     sync::{indexer::YuvTransactionsIndexer, storage::UnspentYuvOutPointsStorage},
-    txbuilder::{IssuanceTransactionBuilder, SweepTransactionBuilder, TransferTransactionBuilder},
-    types::FeeRateStrategy,
+    txbuilder::{
+        get_output_from_storage, IssuanceTransactionBuilder, SweepTransactionBuilder,
+        TransferTransactionBuilder,
+    },
+    types::{FeeRateStrategy, YuvBalances},
     AnyBitcoinProvider,
 };
 
@@ -406,22 +409,46 @@ where
 
     /// Calculate current balances by iterating through transactions from
     /// intenal storage.
-    pub fn balances(&self) -> HashMap<Chroma, u128> {
-        let mut balances = HashMap::new();
+    pub async fn balances(&self) -> eyre::Result<YuvBalances> {
+        let mut yuv_balances = HashMap::new();
+        #[cfg(feature = "bulletproof")]
+        let mut bulletproof_balances = HashMap::new();
+        let mut tweaked_satoshis_balances = 0;
 
-        let utxos = self.utxos.read().unwrap();
-        for proof in utxos.values() {
+        // Collect the data while holding the read lock.
+        let utxos: Vec<(OutPoint, PixelProof)> = {
+            let utxos = self.utxos.read().unwrap();
+            utxos
+                .iter()
+                .map(|(outpoint, proof)| (*outpoint, proof.clone()))
+                .collect()
+        };
+
+        for (outpoint, proof) in utxos {
             if proof.is_empty_pixelproof() {
+                let (_pixel_proof, txout) =
+                    get_output_from_storage(&self.yuv_txs_storage, outpoint).await?;
+                tweaked_satoshis_balances += txout.value;
                 continue;
             }
 
             let pixel = proof.pixel();
-            let balance = balances.entry(pixel.chroma).or_insert(0u128);
 
-            *balance += pixel.luma.amount;
+            #[cfg(feature = "bulletproof")]
+            if proof.is_bulletproof() {
+                *bulletproof_balances.entry(pixel.chroma).or_insert(0) += pixel.luma.amount;
+                continue;
+            }
+
+            *yuv_balances.entry(pixel.chroma).or_insert(0) += pixel.luma.amount;
         }
 
-        balances
+        Ok(YuvBalances {
+            yuv: yuv_balances,
+            tweaked_satoshis: tweaked_satoshis_balances,
+            #[cfg(feature = "bulletproof")]
+            bulletproof: bulletproof_balances,
+        })
     }
 
     /// Get Bitcoin balances.

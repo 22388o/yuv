@@ -3,8 +3,8 @@
 mod errors;
 pub use errors::CheckError;
 
-mod transaction;
-pub use transaction::check_transaction;
+mod isolated_checks;
+pub use isolated_checks::check_transaction;
 
 mod worker;
 pub use worker::{Config, TxCheckerWorker};

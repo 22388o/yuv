@@ -5,8 +5,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 use tokio_util::sync::CancellationToken;
-use yuv_types::messages::TxsToConfirm;
-use yuv_types::{TxCheckerMessage, TxConfirmMessage, YuvTransaction};
+use yuv_types::{TxCheckerMessage, TxConfirmMessage, YuvTransaction, DEFAULT_CONFIRMATIONS_NUMBER};
 
 /// `TxConfirmator` is responsible for waiting confirmations of transactions in Bitcoin.
 pub struct TxConfirmator<BC>
@@ -15,17 +14,15 @@ where
 {
     event_bus: EventBus,
     bitcoin_client: Arc<BC>,
-
     /// Confirmations queue. Contains transactions that are waiting confirmation.
     queue: HashMap<Txid, UnconfirmedTransaction>,
     /// Max time that transaction can wait confirmation before it will be removed from the queue.
     max_confirmation_time: Duration,
     /// Interval between waiting txs clean up.
     clean_up_interval: Duration,
+    /// Contains the number of confirmations required to consider a transaction as confirmed.
+    confirmations_number: u8,
 }
-
-/// Number of confirmations that is required to consider transaction as confirmed.
-const MIN_CONFIRMATIONS: u32 = 1;
 
 impl<BC> TxConfirmator<BC>
 where
@@ -36,10 +33,13 @@ where
         bitcoin_client: Arc<BC>,
         max_confirmation_time: Duration,
         clean_up_interval: Duration,
+        confirmations_number: Option<u8>,
     ) -> Self {
         let event_bus = event_bus
             .extract(&typeid![TxCheckerMessage], &typeid![TxConfirmMessage])
             .expect("event channels must be presented");
+
+        let confirmations_number = confirmations_number.unwrap_or(DEFAULT_CONFIRMATIONS_NUMBER);
 
         Self {
             event_bus,
@@ -47,6 +47,7 @@ where
             max_confirmation_time,
             bitcoin_client,
             clean_up_interval,
+            confirmations_number,
         }
     }
 
@@ -81,24 +82,13 @@ where
 
     async fn handle_event(&mut self, event: TxConfirmMessage) -> eyre::Result<()> {
         match event {
-            TxConfirmMessage::ConfirmBatchTx(txs) => {
-                self.confirm_batch_tx(txs).await?;
-            }
-        }
-
-        Ok(())
-    }
-
-    async fn confirm_batch_tx(&mut self, txs: TxsToConfirm) -> eyre::Result<()> {
-        tracing::debug!("Checking txs: {:?}", txs);
-
-        match txs {
-            TxsToConfirm::YuvTxs(yuv_txs) => {
+            TxConfirmMessage::TxsToConfirm(yuv_txs) => {
                 for yuv_tx in yuv_txs {
-                    self.handle_confirm_tx(yuv_tx).await?;
+                    self.handle_tx_to_confirm(yuv_tx).await?;
                 }
             }
-            TxsToConfirm::Txids(tx_ids) => {
+            TxConfirmMessage::ConfirmedTxIds(tx_ids) => {
+                // Find the transactions that are waiting confirmation in the queue to confirm them.
                 let yuv_txs: Vec<YuvTransaction> = tx_ids
                     .iter()
                     .filter_map(|tx_id| {
@@ -109,29 +99,27 @@ where
                     .collect::<Vec<YuvTransaction>>();
 
                 for yuv_tx in yuv_txs {
-                    self.handle_confirm_tx(yuv_tx).await?;
+                    self.new_confirmed_tx(yuv_tx).await;
                 }
             }
-        };
+        }
 
         Ok(())
     }
 
     /// Handle new transaction to confirm it. If transaction is already confirmed, then it will be
     /// sent to the `TxChecker`. Otherwise it will be added to the queue.
-    async fn handle_confirm_tx(&mut self, yuv_tx: YuvTransaction) -> eyre::Result<()> {
+    async fn handle_tx_to_confirm(&mut self, yuv_tx: YuvTransaction) -> eyre::Result<()> {
         let got_tx = self
             .bitcoin_client
             .get_raw_transaction_info(&yuv_tx.bitcoin_tx.txid(), None)
             .await?;
 
         if let Some(confirmations) = got_tx.confirmations {
-            if confirmations >= MIN_CONFIRMATIONS {
+            if confirmations >= self.confirmations_number as u32 {
                 self.new_confirmed_tx(yuv_tx).await;
                 return Ok(());
             }
-
-            tracing::debug!("confirmations too low: {}", confirmations);
         }
 
         tracing::debug!(
@@ -167,7 +155,7 @@ where
 
                 self.queue.remove(&txid);
             } else {
-                self.handle_confirm_tx(unconfirmed_tx.yuv_tx).await?;
+                self.handle_tx_to_confirm(unconfirmed_tx.yuv_tx).await?;
             }
         }
 

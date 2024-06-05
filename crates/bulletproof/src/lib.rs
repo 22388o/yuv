@@ -14,6 +14,7 @@ pub use range_proof::RangeProof;
 
 mod constants;
 mod range_proof;
+pub mod util;
 mod vec_ops;
 mod wip;
 

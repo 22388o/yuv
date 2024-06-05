@@ -18,7 +18,7 @@ tx_per_page = 100
 pool_size = 4 # how many checker workers will node have
 
 [bnode]
-url = "bitcoind:18443"                           # url to bitcoin node
+url = "http://bitcoind:18443"                    # url to bitcoin node
 auth = { username = "admin1", password = "123" } # bitcoin node auth
 
 [logger]

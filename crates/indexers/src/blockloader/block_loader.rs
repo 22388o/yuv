@@ -2,10 +2,7 @@ use std::sync::Arc;
 
 use bitcoin_client::{json::GetBlockTxResult, BitcoinRpcApi, BitcoinRpcClient};
 use eyre::Ok;
-use tokio::{
-    select,
-    sync::mpsc::{self, Receiver, Sender},
-};
+use tokio::{select, sync::mpsc};
 use tokio_util::{sync::CancellationToken, task::TaskTracker};
 use tracing::instrument;
 
@@ -29,6 +26,8 @@ pub struct BlockLoader {
     task_tracker: TaskTracker,
     /// Loading progress, contains loading process of the chunk
     loading_progress: LoadingProgress,
+    /// Number of confirmations that is required to consider block as confirmed.
+    confirmation_number: u8,
 }
 
 impl BlockLoader {
@@ -36,6 +35,7 @@ impl BlockLoader {
         bitcoin_client: Arc<BitcoinRpcClient>,
         workers_number: usize,
         chunk_size: usize,
+        confirmation_number: u8,
     ) -> Self {
         Self {
             bitcoin_client,
@@ -44,6 +44,7 @@ impl BlockLoader {
             loaded_blocks: Vec::with_capacity(chunk_size),
             task_tracker: TaskTracker::new(),
             loading_progress: LoadingProgress::default(),
+            confirmation_number,
         }
     }
 }
@@ -52,7 +53,7 @@ impl BlockLoader {
     fn run_workers(
         &self,
         load_block_receiver: flume::Receiver<LoadBlockEvent>,
-        loaded_block_sender: Sender<FetchLoadedBlockEvent>,
+        loaded_block_sender: mpsc::Sender<FetchLoadedBlockEvent>,
         time_to_sleep: u64,
         cancellation: CancellationToken,
     ) {
@@ -80,12 +81,12 @@ impl BlockLoader {
     ) -> eyre::Result<()> {
         match event {
             FetchLoadedBlockEvent::Loaded(block) => {
-                tracing::trace!("received block with height {}", block.block_data.height);
+                tracing::trace!("Received block with height {}", block.block_data.height);
                 self.loaded_blocks.push(*block);
                 self.loading_progress.update_received_blocks();
             }
             FetchLoadedBlockEvent::FailedBlock(block_height) => {
-                tracing::debug!("resend failed block with height: {}", block_height);
+                tracing::debug!("Resend failed block with height: {}", block_height);
                 load_block_sender
                     .send_async(LoadBlockEvent::LoadBlock(block_height))
                     .await?
@@ -115,7 +116,7 @@ impl BlockLoader {
     /// Handles loaded blocks. Stops execution when `received_block` is equal `chunk_size`
     async fn handle_loaded_blocks(
         &mut self,
-        loaded_block_listener: &mut Receiver<FetchLoadedBlockEvent>,
+        loaded_block_listener: &mut mpsc::Receiver<FetchLoadedBlockEvent>,
         load_block_sender: flume::Sender<LoadBlockEvent>,
         chunk_size: usize,
     ) -> eyre::Result<()> {
@@ -168,7 +169,7 @@ impl BlockLoader {
     #[instrument(skip_all)]
     async fn handle_remained_blocks(
         &mut self,
-        loaded_block_listener: &mut Receiver<FetchLoadedBlockEvent>,
+        loaded_block_listener: &mut mpsc::Receiver<FetchLoadedBlockEvent>,
         load_block_sender: &flume::Sender<LoadBlockEvent>,
     ) -> eyre::Result<()> {
         tracing::info!("Waiting for remained loaded blocks...");
@@ -185,11 +186,12 @@ impl BlockLoader {
         &mut self,
         load_block_sender: &flume::Sender<LoadBlockEvent>,
         sender_to_indexer: mpsc::Sender<IndexBlocksEvent>,
-        loaded_block_listener: &mut Receiver<FetchLoadedBlockEvent>,
+        loaded_block_listener: &mut mpsc::Receiver<FetchLoadedBlockEvent>,
         start_height: usize,
     ) -> eyre::Result<()> {
-        let best_block_height = self.bitcoin_client.get_block_count().await? as usize;
-        let blocks_to_load = (start_height..=best_block_height).collect::<Vec<usize>>();
+        let confirmed_height = self.get_confirmed_height().await?;
+
+        let blocks_to_load = (start_height..=(confirmed_height as usize)).collect::<Vec<usize>>();
 
         for blocks_chunk in blocks_to_load.chunks(self.chunk_size) {
             self.send_load_blocks(load_block_sender, blocks_chunk)
@@ -234,7 +236,12 @@ impl BlockLoader {
         );
 
         select! {
-            _ = self.handle_new_blocks(&load_block_sender, sender_to_indexer.clone(), &mut loaded_block_listener, load_from_height) => {}
+            _ = self.handle_new_blocks(
+                &load_block_sender,
+                sender_to_indexer.clone(),
+                &mut loaded_block_listener,
+                load_from_height,
+            ) => {}
 
             _ = cancellation.cancelled() => {
                 tracing::info!("Block loader cancelled. Finishing receiving blocks");
@@ -253,8 +260,17 @@ impl BlockLoader {
 
         self.task_tracker.wait().await;
 
-        tracing::info!("Block loader finished loading proccess");
+        tracing::debug!("Block loader finished loading proccess");
 
         Ok(())
+    }
+
+    async fn get_confirmed_height(&self) -> eyre::Result<u64> {
+        let best_block_height = self.bitcoin_client.get_block_count().await?;
+
+        let confirmed_height =
+            best_block_height.saturating_sub(self.confirmation_number as u64 - 1);
+
+        Ok(confirmed_height)
     }
 }

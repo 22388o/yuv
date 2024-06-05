@@ -9,7 +9,7 @@ use tokio::select;
 use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
-use tracing::{info, warn};
+use tracing::{error, info};
 use yuv_controller::Controller;
 use yuv_indexers::{AnnouncementsIndexer, BitcoinBlockIndexer, ConfirmationIndexer, RunParams};
 
@@ -24,9 +24,12 @@ use yuv_tx_check::{Config as CheckerConfig, TxCheckerWorkerPool};
 use yuv_tx_confirm::TxConfirmator;
 use yuv_types::{ControllerMessage, GraphBuilderMessage, TxCheckerMessage, TxConfirmMessage};
 
+/// Default size of the channel for the event bus.
 const DEFAULT_CHANNEL_SIZE: usize = 1000;
-
+/// The limit of time to wait for the node to shutdown.
 const DEFAULT_SHUTDOWN_TIMEOUT_SECS: u64 = 30;
+// TODO: Temporary solution. Need to be removed after the refactoring of the TxCheckerWorkerPool.
+const TX_CHECKERS_POOL_SIZE: usize = 1;
 
 /// Node encapsulate node service's start
 pub struct Node {
@@ -48,7 +51,12 @@ impl Node {
         let tx_states_storage = TxStatesStorage::default();
 
         let btc_client = Arc::new(
-            BitcoinRpcClient::new(config.bnode.auth().clone(), config.bnode.url.clone()).await?,
+            BitcoinRpcClient::new(
+                config.bnode.auth().clone(),
+                config.bnode.url.clone(),
+                config.bnode.timeout,
+            )
+            .await?,
         );
 
         Ok(Self {
@@ -61,6 +69,11 @@ impl Node {
             cancelation: CancellationToken::new(),
             task_tracker: TaskTracker::new(),
         })
+    }
+
+    /// Wait for the signal from any node's service about the cancellation.
+    pub async fn cancelled(&self) {
+        self.cancelation.cancelled().await
     }
 
     /// The order of service starting is important if you want to index blocks first and then start
@@ -82,9 +95,11 @@ impl Node {
     }
 
     fn spawn_p2p(&self) -> eyre::Result<Handle<Waker>> {
-        let p2p_client_runner =
-            P2PClient::<ReactorTcp>::new(self.config.p2p.clone().try_into()?, &self.event_bus)
-                .expect("P2P client must be successfully created");
+        let p2p_client_runner = P2PClient::<ReactorTcp>::new(
+            self.config.p2p.to_client_config(self.config.network)?,
+            &self.event_bus,
+        )
+        .expect("P2P client must be successfully created");
 
         let handle = p2p_client_runner.handle();
 
@@ -124,7 +139,7 @@ impl Node {
 
     fn spawn_tx_checkers_worker_pool(&self) -> eyre::Result<()> {
         let worker_pool = TxCheckerWorkerPool::from_config(
-            self.config.checkers.pool_size,
+            TX_CHECKERS_POOL_SIZE,
             CheckerConfig {
                 full_event_bus: self.event_bus.clone(),
                 txs_storage: self.txs_storage.clone(),
@@ -145,6 +160,7 @@ impl Node {
             self.btc_client.clone(),
             self.config.indexer.max_confirmation_time,
             self.config.indexer.clean_up_interval,
+            self.config.indexer.confirmations_number,
         );
 
         self.task_tracker
@@ -170,11 +186,15 @@ impl Node {
     }
 
     async fn spawn_indexer(&self) -> eyre::Result<()> {
-        let mut indexer =
-            BitcoinBlockIndexer::new(self.btc_client.clone(), self.state_storage.clone());
+        let mut indexer = BitcoinBlockIndexer::new(
+            self.btc_client.clone(),
+            self.state_storage.clone(),
+            self.config.indexer.confirmations_number,
+            self.config.network,
+        );
 
-        indexer.add_indexer(AnnouncementsIndexer::new(&self.event_bus));
-        indexer.add_indexer(ConfirmationIndexer::new(&self.event_bus));
+        indexer.add_subindexer(AnnouncementsIndexer::new(&self.event_bus));
+        indexer.add_subindexer(ConfirmationIndexer::new(&self.event_bus));
 
         let restart_interval = self.config.indexer.restart_interval;
         let mut current_attempt = 1;
@@ -192,7 +212,7 @@ impl Node {
             }
 
             current_attempt += 1;
-            warn!(
+            error!(
                 %err,
                 "Failed to init the indexer. Trying again in {} secs",
                 restart_interval.as_secs()

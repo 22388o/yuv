@@ -201,11 +201,11 @@ impl WipStmt {
         transcript: &mut Transcript,
     ) -> WipProof {
         let mut y = self.y;
-        let g = *G;
         let h = *H;
+        let g = *G;
 
-        let mut g_bold = G_BOLD1.clone();
         let mut h_bold = H_BOLD1.clone();
+        let mut g_bold = G_BOLD1.clone();
 
         let mut a_l = a_l;
         let mut a_r = a_r;
@@ -213,13 +213,13 @@ impl WipStmt {
 
         let mut l_vec = vec![];
         let mut r_vec = vec![];
-        while g_bold.len() > 1 {
+        while h_bold.len() > 1 {
             let (a_1, a_2) = a_l.clone().split();
             let (b_1, b_2) = a_r.clone().split();
-            let (g_bold1, g_bold2) = split_points(g_bold);
             let (h_bold1, h_bold2) = split_points(h_bold);
+            let (g_bold1, g_bold2) = split_points(g_bold);
 
-            let n_hat = g_bold1.len();
+            let n_hat = h_bold1.len();
 
             let y_n_hat = y[n_hat - 1];
             y.shrink_to(n_hat);
@@ -235,31 +235,31 @@ impl WipStmt {
             let mut l_terms = a_1
                 .mul(&y_n_hat_inv)
                 .drain(..)
-                .zip(g_bold2.iter().copied())
-                .chain(b_2.iter().copied().zip(h_bold1.iter().copied()))
+                .zip(h_bold2.iter().copied())
+                .chain(b_2.iter().copied().zip(g_bold1.iter().copied()))
                 .collect::<Vec<_>>();
-            l_terms.push((c_l, g));
-            l_terms.push((d_l, h));
+            l_terms.push((c_l, h));
+            l_terms.push((d_l, g));
             let l = multiexp::multiexp(&l_terms);
             l_vec.push(l);
 
             let mut r_terms = a_2
                 .mul(&y_n_hat)
                 .drain(..)
-                .zip(g_bold1.iter().copied())
-                .chain(b_1.iter().copied().zip(h_bold2.iter().copied()))
+                .zip(h_bold1.iter().copied())
+                .chain(b_1.iter().copied().zip(g_bold2.iter().copied()))
                 .collect::<Vec<_>>();
-            r_terms.push((c_r, g));
-            r_terms.push((d_r, h));
+            r_terms.push((c_r, h));
+            r_terms.push((d_r, g));
             let r = multiexp::multiexp(&r_terms);
             r_vec.push(r);
 
             let p;
-            (p, g_bold, h_bold) = Self::next_gens(
-                g_bold1,
-                g_bold2,
+            (p, h_bold, g_bold) = Self::next_gens(
                 h_bold1,
                 h_bold2,
+                g_bold1,
+                g_bold2,
                 l,
                 r,
                 y_n_hat_inv,
@@ -282,15 +282,15 @@ impl WipStmt {
         let r_y = r * y[0];
 
         let a_l_terms = vec![
-            (r, g_bold[0]),
-            (s, h_bold[0]),
-            ((r_y * a_r[0]) + (s * y[0] * a_l[0]), g),
-            (delta, h),
+            (r, h_bold[0]),
+            (s, g_bold[0]),
+            ((r_y * a_r[0]) + (s * y[0] * a_l[0]), h),
+            (delta, g),
         ];
 
         let a = multiexp::multiexp(&a_l_terms);
 
-        let a_r_terms = vec![(r_y * s, g), (n, h)];
+        let a_r_terms = vec![(r_y * s, h), (n, g)];
 
         let b = multiexp::multiexp(&a_r_terms);
 
@@ -342,16 +342,16 @@ impl WipStmt {
         }
 
         for i in 0..RANGE_PROOF_SIZE {
-            multiexp.push((indexed_g_bold.inner[i] * proof.r_rev * a_b, G_BOLD1[i]));
+            multiexp.push((indexed_g_bold.inner[i] * proof.r_rev * a_b, H_BOLD1[i]));
         }
 
         for i in 0..RANGE_PROOF_SIZE {
-            multiexp.push((indexed_h_bold.inner[i] * proof.s_rev * a_b, H_BOLD1[i]));
+            multiexp.push((indexed_h_bold.inner[i] * proof.s_rev * a_b, G_BOLD1[i]));
         }
 
         multiexp.push((-a_b, proof.a));
-        multiexp.push((proof.r_rev * self.y[0] * proof.s_rev, *G));
-        multiexp.push((proof.delta_rev, *H));
+        multiexp.push((proof.r_rev * self.y[0] * proof.s_rev, *H));
+        multiexp.push((proof.delta_rev, *G));
         multiexp.push((-k256::Scalar::ONE, proof.b));
 
         verifier.queue(&mut OsRng, (), multiexp);

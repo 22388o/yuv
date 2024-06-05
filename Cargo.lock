@@ -185,6 +185,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "atomic-waker"
+version = "1.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1505bd5d3d116872e7271a6d4e16d81d0c8570876c8de68093a09ac269d8aac0"
+
+[[package]]
 name = "autocfg"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -376,11 +382,11 @@ dependencies = [
 
 [[package]]
 name = "bitcoin-client"
-version = "0.4.3"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "bitcoin",
- "jsonrpc-async",
+ "jsonrpc 0.2.0",
  "log",
  "mockall",
  "serde",
@@ -416,7 +422,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0261b2bb7617e0c91b452a837bbd1291fd34ad6990cb8e3ffc28239cc045b5ca"
 dependencies = [
  "bitcoincore-rpc-json",
- "jsonrpc",
+ "jsonrpc 0.12.1",
  "log",
  "serde",
  "serde_json",
@@ -483,8 +489,10 @@ checksum = "b4ae4235e6dac0694637c763029ecea1a2ec9e4e06ec2729bd21ba4d9c863eb7"
 
 [[package]]
 name = "bulletproof"
-version = "0.4.3"
+version = "0.2.0"
 dependencies = [
+ "bitcoin",
+ "eyre",
  "k256",
  "lazy_static",
  "merlin",
@@ -953,7 +961,7 @@ checksum = "0d6ef0072f8a535281e4876be788938b528e9a1d43900b82c2569af7da799125"
 
 [[package]]
 name = "e2e-test"
-version = "0.4.3"
+version = "0.2.0"
 dependencies = [
  "bdk",
  "bitcoin",
@@ -1138,14 +1146,14 @@ checksum = "847e59bd6ee1c3f2bdf217118ee3640b97a1b1d8becb55771e67e533b87da66f"
 dependencies = [
  "bitcoin",
  "log",
- "reqwest",
+ "reqwest 0.11.27",
  "serde",
  "ureq",
 ]
 
 [[package]]
 name = "event-bus"
-version = "0.4.3"
+version = "0.2.0"
 dependencies = [
  "event-bus-macros",
  "flume",
@@ -1155,7 +1163,7 @@ dependencies = [
 
 [[package]]
 name = "event-bus-macros"
-version = "0.4.3"
+version = "0.2.0"
 dependencies = [
  "event-bus",
  "quote",
@@ -1444,7 +1452,26 @@ dependencies = [
  "futures-core",
  "futures-sink",
  "futures-util",
- "http",
+ "http 0.2.12",
+ "indexmap",
+ "slab",
+ "tokio",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
+name = "h2"
+version = "0.4.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fa82e28a107a8cc405f0839610bdc9b15f1e25ec7d696aa5cf173edbcb1486ab"
+dependencies = [
+ "atomic-waker",
+ "bytes",
+ "fnv",
+ "futures-core",
+ "futures-sink",
+ "http 1.1.0",
  "indexmap",
  "slab",
  "tokio",
@@ -1556,13 +1583,47 @@ dependencies = [
 ]
 
 [[package]]
+name = "http"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "21b9ddb458710bc376481b842f5da65cdf31522de232c1ca8146abce2a358258"
+dependencies = [
+ "bytes",
+ "fnv",
+ "itoa",
+]
+
+[[package]]
 name = "http-body"
 version = "0.4.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7ceab25649e9960c0311ea418d17bee82c0dcec1bd053b5f9a66e265a693bed2"
 dependencies = [
  "bytes",
- "http",
+ "http 0.2.12",
+ "pin-project-lite",
+]
+
+[[package]]
+name = "http-body"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1cac85db508abc24a2e48553ba12a996e87244a0395ce011e62b37158745d643"
+dependencies = [
+ "bytes",
+ "http 1.1.0",
+]
+
+[[package]]
+name = "http-body-util"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0475f8b2ac86659c21b64320d5d653f9efe42acd2a4e560073ec61a155a34f1d"
+dependencies = [
+ "bytes",
+ "futures-core",
+ "http 1.1.0",
+ "http-body 1.0.0",
  "pin-project-lite",
 ]
 
@@ -1588,9 +1649,9 @@ dependencies = [
  "futures-channel",
  "futures-core",
  "futures-util",
- "h2",
- "http",
- "http-body",
+ "h2 0.3.26",
+ "http 0.2.12",
+ "http-body 0.4.6",
  "httparse",
  "httpdate",
  "itoa",
@@ -1603,14 +1664,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "hyper"
+version = "1.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fe575dd17d0862a9a33781c8c4696a55c320909004a67a00fb286ba8b1bc496d"
+dependencies = [
+ "bytes",
+ "futures-channel",
+ "futures-util",
+ "h2 0.4.5",
+ "http 1.1.0",
+ "http-body 1.0.0",
+ "httparse",
+ "itoa",
+ "pin-project-lite",
+ "smallvec",
+ "tokio",
+ "want",
+]
+
+[[package]]
 name = "hyper-rustls"
 version = "0.24.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ec3efd23720e2049821a693cbc7e65ea87c72f1c58ff2f9522ff332b1491e590"
 dependencies = [
  "futures-util",
- "http",
- "hyper",
+ "http 0.2.12",
+ "hyper 0.14.28",
  "log",
  "rustls 0.21.12",
  "rustls-native-certs",
@@ -1625,10 +1706,46 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6183ddfa99b85da61a140bea0efc93fdf56ceaa041b37d553518030827f9905"
 dependencies = [
  "bytes",
- "hyper",
+ "hyper 0.14.28",
  "native-tls",
  "tokio",
  "tokio-native-tls",
+]
+
+[[package]]
+name = "hyper-tls"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "70206fc6890eaca9fde8a0bf71caa2ddfc9fe045ac9e5c70df101a7dbde866e0"
+dependencies = [
+ "bytes",
+ "http-body-util",
+ "hyper 1.3.1",
+ "hyper-util",
+ "native-tls",
+ "tokio",
+ "tokio-native-tls",
+ "tower-service",
+]
+
+[[package]]
+name = "hyper-util"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ca38ef113da30126bbff9cd1705f9273e15d45498615d138b0c20279ac7a76aa"
+dependencies = [
+ "bytes",
+ "futures-channel",
+ "futures-util",
+ "http 1.1.0",
+ "http-body 1.0.0",
+ "hyper 1.3.1",
+ "pin-project-lite",
+ "socket2 0.5.7",
+ "tokio",
+ "tower",
+ "tower-service",
+ "tracing",
 ]
 
 [[package]]
@@ -1733,7 +1850,7 @@ dependencies = [
  "socket2 0.5.7",
  "widestring",
  "windows-sys 0.48.0",
- "winreg",
+ "winreg 0.50.0",
 ]
 
 [[package]]
@@ -1788,6 +1905,17 @@ dependencies = [
 
 [[package]]
 name = "jsonrpc"
+version = "0.2.0"
+dependencies = [
+ "async-trait",
+ "base64 0.13.1",
+ "reqwest 0.12.4",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "jsonrpc"
 version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f8423b78fc94d12ef1a4a9d13c348c9a78766dda0cc18817adf0faf77e670c8"
@@ -1796,20 +1924,6 @@ dependencies = [
  "serde",
  "serde_derive",
  "serde_json",
-]
-
-[[package]]
-name = "jsonrpc-async"
-version = "2.0.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a20e8e4ed08ee58717113cbf277b1ecef5cd9554d3e48c114de338289727d466"
-dependencies = [
- "async-trait",
- "base64-compat",
- "serde",
- "serde_derive",
- "serde_json",
- "tokio",
 ]
 
 [[package]]
@@ -1839,7 +1953,7 @@ dependencies = [
  "beef",
  "futures-timer",
  "futures-util",
- "hyper",
+ "hyper 0.14.28",
  "jsonrpsee-types",
  "parking_lot 0.12.2",
  "rand",
@@ -1859,7 +1973,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5f80c17f62c7653ce767e3d7288b793dfec920f97067ceb189ebdd3570f2bc20"
 dependencies = [
  "async-trait",
- "hyper",
+ "hyper 0.14.28",
  "hyper-rustls",
  "jsonrpsee-core",
  "jsonrpsee-types",
@@ -1892,8 +2006,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "82c39a00449c9ef3f50b84fc00fc4acba20ef8f559f07902244abf4c15c5ab9c"
 dependencies = [
  "futures-util",
- "http",
- "hyper",
+ "http 0.2.12",
+ "hyper 0.14.28",
  "jsonrpsee-core",
  "jsonrpsee-types",
  "route-recognizer",
@@ -2051,6 +2165,15 @@ name = "match_cfg"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ffbee8634e0d45d258acb448e7eaab3fce7a0a467395d4d9f228e3c1f01fb2e4"
+
+[[package]]
+name = "matchers"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8263075bb86c5a1b1427b5ae862e8889656f126e9f77c484496e8b47cf5c5558"
+dependencies = [
+ "regex-automata 0.1.10",
+]
 
 [[package]]
 name = "memchr"
@@ -2665,8 +2788,17 @@ checksum = "c117dbdfde9c8308975b6a18d71f3f385c89461f7b3fb054288ecf2a2058ba4c"
 dependencies = [
  "aho-corasick",
  "memchr",
- "regex-automata",
- "regex-syntax",
+ "regex-automata 0.4.6",
+ "regex-syntax 0.8.3",
+]
+
+[[package]]
+name = "regex-automata"
+version = "0.1.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6c230d73fb8d8c1b9c0b3135c5142a8acee3a0558fb8db5cf1cb65f8d7862132"
+dependencies = [
+ "regex-syntax 0.6.29",
 ]
 
 [[package]]
@@ -2677,8 +2809,14 @@ checksum = "86b83b8b9847f9bf95ef68afb0b8e6cdb80f498442f5179a29fad448fcc1eaea"
 dependencies = [
  "aho-corasick",
  "memchr",
- "regex-syntax",
+ "regex-syntax 0.8.3",
 ]
+
+[[package]]
+name = "regex-syntax"
+version = "0.6.29"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f162c6dd7b008981e4d40210aca20b4bd0f9b60ca9271061b07f78537722f2e1"
 
 [[package]]
 name = "regex-syntax"
@@ -2697,11 +2835,11 @@ dependencies = [
  "encoding_rs",
  "futures-core",
  "futures-util",
- "h2",
- "http",
- "http-body",
- "hyper",
- "hyper-tls",
+ "h2 0.3.26",
+ "http 0.2.12",
+ "http-body 0.4.6",
+ "hyper 0.14.28",
+ "hyper-tls 0.5.0",
  "ipnet",
  "js-sys",
  "log",
@@ -2710,7 +2848,7 @@ dependencies = [
  "once_cell",
  "percent-encoding",
  "pin-project-lite",
- "rustls-pemfile",
+ "rustls-pemfile 1.0.4",
  "serde",
  "serde_json",
  "serde_urlencoded",
@@ -2724,7 +2862,49 @@ dependencies = [
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
- "winreg",
+ "winreg 0.50.0",
+]
+
+[[package]]
+name = "reqwest"
+version = "0.12.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "566cafdd92868e0939d3fb961bd0dc25fcfaaed179291093b3d43e6b3150ea10"
+dependencies = [
+ "base64 0.22.0",
+ "bytes",
+ "encoding_rs",
+ "futures-core",
+ "futures-util",
+ "h2 0.4.5",
+ "http 1.1.0",
+ "http-body 1.0.0",
+ "http-body-util",
+ "hyper 1.3.1",
+ "hyper-tls 0.6.0",
+ "hyper-util",
+ "ipnet",
+ "js-sys",
+ "log",
+ "mime",
+ "native-tls",
+ "once_cell",
+ "percent-encoding",
+ "pin-project-lite",
+ "rustls-pemfile 2.1.2",
+ "serde",
+ "serde_json",
+ "serde_urlencoded",
+ "sync_wrapper",
+ "system-configuration",
+ "tokio",
+ "tokio-native-tls",
+ "tower-service",
+ "url",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+ "winreg 0.52.0",
 ]
 
 [[package]]
@@ -2850,7 +3030,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a9aace74cb666635c918e9c12bc0d348266037aa8eb599b5cba565709a8dff00"
 dependencies = [
  "openssl-probe",
- "rustls-pemfile",
+ "rustls-pemfile 1.0.4",
  "schannel",
  "security-framework",
 ]
@@ -2862,6 +3042,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1c74cae0a4cf6ccbbf5f359f08efdf8ee7e1dc532573bf0db71968cb56b1448c"
 dependencies = [
  "base64 0.21.7",
+]
+
+[[package]]
+name = "rustls-pemfile"
+version = "2.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "29993a25686778eb88d4189742cd713c9bce943bc54251a33509dc63cbacf73d"
+dependencies = [
+ "base64 0.22.0",
+ "rustls-pki-types",
 ]
 
 [[package]]
@@ -3230,7 +3420,7 @@ dependencies = [
  "base64 0.13.1",
  "bytes",
  "futures",
- "http",
+ "http 0.2.12",
  "httparse",
  "log",
  "rand",
@@ -3362,7 +3552,7 @@ checksum = "3369f5ac52d5eb6ab48c6b4ffdc8efbcad6b89c765749064ba298f2c68a16a76"
 
 [[package]]
 name = "tests"
-version = "0.4.3"
+version = "0.2.0"
 dependencies = [
  "bdk",
  "bitcoin",
@@ -3632,6 +3822,7 @@ dependencies = [
  "futures-util",
  "pin-project",
  "pin-project-lite",
+ "tokio",
  "tower-layer",
  "tower-service",
  "tracing",
@@ -3720,10 +3911,14 @@ version = "0.3.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ad0f048c97dbd9faa9b7df56362b8ebcaa52adb06b498c050d2f4e32f90a7a8b"
 dependencies = [
+ "matchers",
+ "once_cell",
+ "regex",
  "serde",
  "serde_json",
  "sharded-slab",
  "thread_local",
+ "tracing",
  "tracing-core",
  "tracing-serde",
 ]
@@ -4238,6 +4433,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "winreg"
+version = "0.52.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a277a57398d4bfa075df44f501a17cfdf8542d224f0d36095a2adc7aee4ef0a5"
+dependencies = [
+ "cfg-if",
+ "windows-sys 0.48.0",
+]
+
+[[package]]
 name = "wyz"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4248,14 +4453,16 @@ dependencies = [
 
 [[package]]
 name = "ydk"
-version = "0.4.3"
+version = "0.2.0"
 dependencies = [
  "bdk",
  "bitcoin",
  "bitcoin-client",
+ "bulletproof",
  "ciborium",
  "eyre",
  "futures",
+ "hashbrown 0.14.5",
  "jsonrpsee",
  "once_cell",
  "rand",
@@ -4270,11 +4477,12 @@ dependencies = [
 
 [[package]]
 name = "yuv-cli"
-version = "0.4.3"
+version = "0.2.0"
 dependencies = [
  "bdk",
  "bitcoin",
  "bitcoin-client",
+ "bulletproof",
  "clap",
  "color-eyre",
  "config",
@@ -4299,7 +4507,7 @@ dependencies = [
 
 [[package]]
 name = "yuv-controller"
-version = "0.4.3"
+version = "0.2.0"
 dependencies = [
  "bitcoin",
  "event-bus",
@@ -4315,7 +4523,7 @@ dependencies = [
 
 [[package]]
 name = "yuv-indexers"
-version = "0.4.3"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "bitcoin",
@@ -4337,7 +4545,7 @@ dependencies = [
 
 [[package]]
 name = "yuv-p2p"
-version = "0.4.3"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "bitcoin",
@@ -4368,11 +4576,13 @@ dependencies = [
 
 [[package]]
 name = "yuv-pixels"
-version = "0.4.3"
+version = "0.2.0"
 dependencies = [
+ "bdk",
  "bitcoin",
  "bulletproof",
  "core2 0.3.3",
+ "hashbrown 0.14.5",
  "hex",
  "once_cell",
  "serde",
@@ -4381,7 +4591,7 @@ dependencies = [
 
 [[package]]
 name = "yuv-rpc-api"
-version = "0.4.3"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "bitcoin",
@@ -4393,7 +4603,7 @@ dependencies = [
 
 [[package]]
 name = "yuv-rpc-server"
-version = "0.4.3"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "bitcoin",
@@ -4415,7 +4625,7 @@ dependencies = [
 
 [[package]]
 name = "yuv-storage"
-version = "0.4.3"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "bitcoin",
@@ -4433,7 +4643,7 @@ dependencies = [
 
 [[package]]
 name = "yuv-tx-attach"
-version = "0.4.3"
+version = "0.2.0"
 dependencies = [
  "bitcoin",
  "bitcoin-client",
@@ -4453,7 +4663,7 @@ dependencies = [
 
 [[package]]
 name = "yuv-tx-check"
-version = "0.4.3"
+version = "0.2.0"
 dependencies = [
  "bitcoin",
  "bitcoin-client",
@@ -4477,7 +4687,7 @@ dependencies = [
 
 [[package]]
 name = "yuv-tx-confirm"
-version = "0.4.3"
+version = "0.2.0"
 dependencies = [
  "bitcoin",
  "bitcoin-client",
@@ -4491,7 +4701,7 @@ dependencies = [
 
 [[package]]
 name = "yuv-types"
-version = "0.4.3"
+version = "0.2.0"
 dependencies = [
  "bitcoin",
  "ciborium",
@@ -4509,7 +4719,7 @@ dependencies = [
 
 [[package]]
 name = "yuvd"
-version = "0.4.3"
+version = "0.2.0"
 dependencies = [
  "bitcoin",
  "bitcoin-client",

@@ -2,11 +2,11 @@ use bitcoin::{
     util::address::{Payload, WitnessVersion},
     Address,
 };
+use bulletproof::util::ecdh;
 use clap::Args;
 use color_eyre::eyre;
 use yuv_pixels::Chroma;
 
-use super::ecdh;
 use crate::context::Context;
 
 #[derive(Args, Debug)]

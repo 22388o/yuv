@@ -1,7 +1,6 @@
-use eyre::Context;
+use eyre::{Context, OptionExt};
 use serde::{Deserialize, Serialize};
 use std::net::{SocketAddr, ToSocketAddrs};
-use std::str::FromStr;
 use yuv_p2p::client;
 use yuv_types::network::Network;
 
@@ -15,9 +14,6 @@ pub const DEFAULT_MAX_OUTBOUND_CONNECTIONS: usize = 8;
 pub struct P2pConfig {
     /// Address to listen to incoming connections
     pub address: String,
-    /// P2p network type
-    #[serde(default = "default_network", deserialize_with = "deserialize_network")]
-    pub network: Network,
     /// Maximum amount of inbound connections
     #[serde(default = "default_max_inbound_connections")]
     pub max_inbound_connections: usize,
@@ -37,24 +33,9 @@ fn default_max_outbound_connections() -> usize {
     DEFAULT_MAX_OUTBOUND_CONNECTIONS
 }
 
-fn deserialize_network<'de, D>(deserializer: D) -> Result<Network, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let s = String::deserialize(deserializer)?;
-
-    Network::from_str(&s).map_err(serde::de::Error::custom)
-}
-
-fn default_network() -> Network {
-    Network::Bitcoin
-}
-
-impl TryFrom<P2pConfig> for client::P2PConfig {
-    type Error = eyre::Error;
-
-    fn try_from(value: P2pConfig) -> Result<client::P2PConfig, Self::Error> {
-        let bootnodes: Vec<SocketAddr> = value
+impl P2pConfig {
+    pub fn to_client_config(&self, network: Network) -> eyre::Result<client::P2PConfig> {
+        let bootnodes: Vec<SocketAddr> = self
             .bootnodes
             .iter()
             .map(|x| {
@@ -66,19 +47,19 @@ impl TryFrom<P2pConfig> for client::P2PConfig {
             .flatten()
             .collect();
 
-        let address = value
+        let address = self
             .address
             .to_socket_addrs()
             .wrap_err("Failed to resolve address")?
             .next()
-            .ok_or_else(|| eyre::eyre!("No address found in listen address"))?;
+            .ok_or_eyre("No address found in listen address")?;
 
         Ok(client::P2PConfig::new(
-            value.network,
+            network,
             address,
             bootnodes,
-            value.max_inbound_connections,
-            value.max_outbound_connections,
+            self.max_inbound_connections,
+            self.max_outbound_connections,
         ))
     }
 }

@@ -1,9 +1,9 @@
 use std::usize;
 
-use crate::context::Context;
+use crate::{check_equal_lengths, context::Context};
 use bdk::blockchain::Blockchain;
 use clap::Args;
-use color_eyre::eyre::{self, bail, Ok};
+use color_eyre::eyre::{self, Ok};
 use yuv_pixels::Chroma;
 use yuv_rpc_api::transactions::YuvTransactionsRpcClient;
 
@@ -51,9 +51,8 @@ pub async fn run(
     }: TransferArgs,
     mut ctx: Context,
 ) -> eyre::Result<()> {
-    if chroma.len() != amount.len() || chroma.len() != recipient.len() {
-        bail!("Number of chromas, amounts and recipients must correspond to each other")
-    }
+    check_equal_lengths!(amount, chroma, recipient);
+
     let wallet = ctx.wallet().await?;
     let satoshis = process_satoshis(satoshis, chroma.len())?;
     let blockchain = ctx.blockchain()?;

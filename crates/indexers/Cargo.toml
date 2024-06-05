@@ -21,9 +21,9 @@ tokio = { workspace = true, features = [
     "macros",
     "rt-multi-thread",
 ] }
-tokio-util = { workspace = true }
+tokio-util = { workspace = true, features = ["rt"] }
 bitcoin = { workspace = true }
-tracing = { workspace = true }
+tracing = { workspace = true, features = ["attributes"] }
 async-trait = { workspace = true }
 futures = { workspace = true }
 serde = { workspace = true, features = ["derive"] }

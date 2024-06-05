@@ -1,5 +1,6 @@
 use config::Config;
 use serde::Deserialize;
+use yuv_types::network::Network;
 
 use std::path::PathBuf;
 
@@ -30,6 +31,9 @@ pub use controller::ControllerConfig;
 
 #[derive(Deserialize)]
 pub struct NodeConfig {
+    #[serde(default = "default_network")]
+    pub network: Network,
+
     pub p2p: P2pConfig,
     pub rpc: RpcConfig,
     pub bnode: BitcoinConfig,
@@ -49,6 +53,10 @@ pub struct NodeConfig {
 
     #[serde(default)]
     pub controller: ControllerConfig,
+}
+
+fn default_network() -> Network {
+    Network::Bitcoin
 }
 
 impl NodeConfig {

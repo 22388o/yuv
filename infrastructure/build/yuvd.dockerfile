@@ -3,7 +3,7 @@ FROM rust:1.74-alpine3.18 as builder
 # This is important, see https://github.com/rust-lang/docker-rust/issues/85
 ENV RUSTFLAGS="-C target-feature=-crt-static"
 # if needed, add additional dependencies here
-RUN apk add --no-cache musl-dev
+RUN apk add --no-cache musl-dev openssl-dev
 
 WORKDIR /opt
 

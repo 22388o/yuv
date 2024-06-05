@@ -2,7 +2,19 @@ use alloc::vec;
 use alloc::vec::Vec;
 use core::hash::Hash;
 #[cfg(feature = "bulletproof")]
-use core::hash::Hasher;
+use {
+    crate::Luma,
+    alloc::boxed::Box,
+    bitcoin::{
+        hashes::{sha256::Hash as Sha256Hash, Hash as BitcoinHash, HashEngine},
+        secp256k1::schnorr::Signature as SchnorrSignature,
+    },
+    bulletproof::{
+        k256::{elliptic_curve::group::GroupEncoding, EncodedPoint, ProjectivePoint},
+        RangeProof,
+    },
+    core::hash::Hasher,
+};
 
 use bitcoin::{
     blockdata::{opcodes, script::Builder},
@@ -10,12 +22,6 @@ use bitcoin::{
     secp256k1,
     util::ecdsa::EcdsaSig as Signature,
     PublicKey, Script, TxIn, TxOut, Witness,
-};
-
-#[cfg(feature = "bulletproof")]
-use bulletproof::{
-    k256::{EncodedPoint, ProjectivePoint},
-    RangeProof,
 };
 
 #[cfg(all(feature = "bulletproof", feature = "serde"))]
@@ -57,7 +63,7 @@ pub enum PixelProof {
 
     /// The bulletproof with a corresponsing Pedersen commitment
     #[cfg(feature = "bulletproof")]
-    Bulletproof(alloc::boxed::Box<Bulletproof>),
+    Bulletproof(Box<Bulletproof>),
 
     /// Proof for spending lightning HTLC output at force-close.
     LightningHtlc(LightningHtlcProof),
@@ -107,16 +113,20 @@ impl PixelProof {
     pub fn bulletproof(
         pixel: impl Into<Pixel>,
         inner_key: secp256k1::PublicKey,
+        sender_key: secp256k1::PublicKey,
         commitment: ProjectivePoint,
-        commiter: secp256k1::PublicKey,
         proof: RangeProof,
+        signature: SchnorrSignature,
+        chroma_signature: SchnorrSignature,
     ) -> Self {
-        Self::Bulletproof(alloc::boxed::Box::new(Bulletproof::new(
+        Self::Bulletproof(Box::new(Bulletproof::new(
             pixel.into(),
             inner_key,
+            sender_key,
             commitment,
-            commiter,
             proof,
+            signature,
+            chroma_signature,
         )))
     }
 
@@ -203,7 +213,9 @@ pub struct Bulletproof {
     pub pixel: Pixel,
     /// Key of current owner of the pixel.
     pub inner_key: secp256k1::PublicKey,
-    /// Peterson commitment of the pixel amount.
+    /// Key of of the sender.
+    pub sender_key: secp256k1::PublicKey,
+    /// Pedersen commitment of the pixel amount.
     #[cfg_attr(
         feature = "serde",
         serde(
@@ -212,7 +224,6 @@ pub struct Bulletproof {
         )
     )]
     pub commitment: ProjectivePoint,
-    pub commiter: secp256k1::PublicKey,
     /// Bulletproof proof itself .
     #[cfg_attr(
         feature = "serde",
@@ -222,12 +233,14 @@ pub struct Bulletproof {
         )
     )]
     pub proof: RangeProof,
+    pub signature: SchnorrSignature,
+    pub chroma_signature: SchnorrSignature,
 }
 
 #[cfg(feature = "bulletproof")]
 impl From<Bulletproof> for PixelProof {
     fn from(value: Bulletproof) -> Self {
-        Self::Bulletproof(alloc::boxed::Box::new(value))
+        Self::Bulletproof(Box::new(value))
     }
 }
 
@@ -253,6 +266,7 @@ pub enum BulletproofError {
     P2wkhWitnessParseError(P2WPKHWitnessParseError),
     InvalidScript(Script, Script),
     InvalidRangeProof,
+    LumaMismatch,
 }
 
 #[cfg(feature = "bulletproof")]
@@ -284,6 +298,7 @@ impl core::fmt::Display for BulletproofError {
                 write!(f, "InvalidScript: expected: {}, found: {}", expected, found)
             }
             Self::InvalidRangeProof => write!(f, "InvalidRangeProof"),
+            Self::LumaMismatch => write!(f, "Luma doesn't match the proof and commitment"),
         }
     }
 }
@@ -297,6 +312,7 @@ impl std::error::Error for BulletproofError {
             Self::P2wkhWitnessParseError(err) => Some(err),
             Self::InvalidScript(_, _) => None,
             Self::InvalidRangeProof => None,
+            Self::LumaMismatch => None,
         }
     }
 }
@@ -306,16 +322,20 @@ impl Bulletproof {
     pub fn new(
         pixel: Pixel,
         inner_key: secp256k1::PublicKey,
+        sender_key: secp256k1::PublicKey,
         commitment: ProjectivePoint,
-        commiter: secp256k1::PublicKey,
         proof: RangeProof,
+        signature: SchnorrSignature,
+        chroma_signature: SchnorrSignature,
     ) -> Self {
         Self {
             pixel,
             inner_key,
+            sender_key,
             commitment,
-            commiter,
             proof,
+            signature,
+            chroma_signature,
         }
     }
 
@@ -335,6 +355,18 @@ impl Bulletproof {
         }
 
         Ok(())
+    }
+
+    pub(crate) fn check_luma(&self) -> bool {
+        let mut hash_engine = Sha256Hash::engine();
+
+        hash_engine.input(&self.commitment.to_bytes());
+        hash_engine.input(&self.proof.to_bytes());
+
+        let bytes = Sha256Hash::from_engine(hash_engine);
+        let value_proof_hash = bytes.as_inner();
+
+        Luma::from(*value_proof_hash) == self.pixel.luma
     }
 }
 
@@ -366,6 +398,10 @@ impl CheckableProof for Bulletproof {
                 txout.script_pubkey.clone(),
                 expected_script_pubkey,
             ));
+        }
+
+        if !self.check_luma() {
+            return Err(BulletproofError::LumaMismatch);
         }
 
         if !bulletproof::verify(self.commitment, self.proof.clone()) {

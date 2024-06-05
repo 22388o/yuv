@@ -7,16 +7,17 @@ services:
     stop_grace_period: 30s
     user: 0:0
     healthcheck:
-      test: ["CMD", "bitcoin-cli", "getinfo"]
+      test: [ "CMD", "bitcoin-cli", "getnetworkinfo" ]
+      interval: 2s
     volumes:
       - ./infrastructure/dev/configs/bitcoind.conf:/root/.bitcoin/bitcoin.conf
       - ./volumes.dev/bitcoind:/root/.bitcoin
       - ./infrastructure/dev/configs/faucet.sh:/faucet.sh
-    command: ["-addnode=bitcoind2:18444"]
+    command: [ "-addnode=bitcoind2:18444" ]
     entrypoint:
-        - "sh"
-        - "-c"
-        - "bitcoind"
+      - "sh"
+      - "-c"
+      - "bitcoind"
     ports:
       - 18443:18443
       - 18444:18444
@@ -28,13 +29,14 @@ services:
     stop_grace_period: 30s
     user: 0:0
     healthcheck:
-      test: ["CMD", "bitcoin-cli", "getinfo"]
+      test: [ "CMD", "bitcoin-cli", "getnetworkinfo" ]
+      interval: 2s
     volumes:
       - ./infrastructure/dev/configs/bitcoind.conf:/root/.bitcoin/bitcoin.conf
       - ./volumes.dev/bitcoind2:/root/.bitcoin
-    command: ["-addnode=bitcoind:18444"]
+    command: [ "-addnode=bitcoind:18444" ]
     profiles:
-      - end_to_end 
+      - end_to_end
     ports:
       - 18445:18443
       - 18446:18444
@@ -62,7 +64,8 @@ services:
       - "*"
       - --jsonrpc-import
     depends_on:
-      - bitcoind
+      bitcoind:
+        condition: service_healthy
     ports:
       - 30000:30000
     volumes:
@@ -94,13 +97,14 @@ services:
       - "*"
       - --jsonrpc-import
     depends_on:
-      - bitcoind2
+      bitcoind2:
+        condition: service_healthy
     ports:
       - 30001:30000
     volumes:
       - ./volumes.dev/bitcoind2/:/config
     profiles:
-      - end_to_end 
+      - end_to_end
     restart: on-failure
 
   yuvd:
@@ -117,8 +121,9 @@ services:
       - 8001:8001 # p2p
       - 18333:18333 # rpc
     depends_on:
-      - bitcoind
-    
+      bitcoind:
+        condition: service_healthy
+
   yuvd2:
     image: akitamiabtc/yuvd
     build:
@@ -126,7 +131,7 @@ services:
       dockerfile: ./infrastructure/build/yuvd.dockerfile
     restart: on-failure
     profiles:
-      - two_nodes_setup 
+      - two_nodes_setup
       - three_nodes_setup
       - end_to_end
     container_name: yuvd2
@@ -137,8 +142,10 @@ services:
       - 8003:8003 # p2p
       - 18335:18335 # rpc
     depends_on:
-      - bitcoind
-      - yuvd
+      bitcoind:
+        condition: service_healthy
+      yuvd:
+        condition: service_started
 
   yuvd3:
     image: akitamiabtc/yuvd
@@ -146,13 +153,16 @@ services:
       context: .
       dockerfile: ./infrastructure/build/yuvd.dockerfile
     depends_on:
-      - yuvd
-      - yuvd2
-      - bitcoind
+      bitcoind:
+        condition: service_healthy
+      yuvd:
+        condition: service_started
+      yuvd2:
+        condition: service_started
     restart: on-failure
     profiles:
       - three_nodes_setup
-      - end_to_end 
+      - end_to_end
     container_name: yuvd3
     volumes:
       - ./infrastructure/dev/configs/yuvd-3.toml:/config.toml

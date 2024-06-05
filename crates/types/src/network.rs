@@ -1,12 +1,24 @@
 use core::{fmt::Display, str::FromStr};
 
-use bitcoin::Network as BitcoinNetwork;
+use bitcoin::{hashes::hex::FromHex, BlockHash, Network as BitcoinNetwork};
+
+use alloc::string::String;
 
 /// Mutiny network magic.
 pub const MUTINY_MAGIC: u32 = 0xcb2ddfa5;
 
+/// YUV genesis block for `Mainnet`.
+const MAINNET_GENESIS_BLOCK: &str =
+    "00000000000000000000cde86faf8ea6994e4ca31ed351e55912f617f5dd8ee8";
+/// YUV genesis block for `Testnet`.
+const TESTNET_GENESIS_BLOCK: &str =
+    "000000008ce763d0e9906fc5b50acdd7c8ddc5b1413b1b526f386500628a505c";
+/// YUV genesis block for `Mutiny`.
+const MUTINY_GENESIS_BLOCK: &str =
+    "000002d06087e074a71f1e8e805dcb3264fa9ff4700250ba3f0e95ab05e61afa";
+
 #[derive(Debug, Clone, Copy)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 /// Default Bitcoin network types.
 pub enum Network {
     Bitcoin,
@@ -36,6 +48,43 @@ impl Network {
         } else {
             self.to_bitcoin_network().magic()
         }
+    }
+
+    /// Returns the block that contains the very first YUV transaction for the given network.
+    /// Note: indexing should always start from the block with the height not higher than the one
+    /// specified in the genesis block.
+    ///
+    /// List of supported networks:
+    /// - `network::Bitcoin`
+    /// - `network::Testnet`
+    /// - `network::Mutiny`
+    pub fn yuv_genesis_block(&self) -> Option<BlockHash> {
+        let Some(network_str) = self.get_block_by_network() else {
+            return None;
+        };
+
+        Some(BlockHash::from_hex(&network_str).expect("valid block hash"))
+    }
+
+    fn get_block_by_network(&self) -> Option<String> {
+        match self {
+            Network::Bitcoin => Some(MAINNET_GENESIS_BLOCK.into()),
+            Network::Testnet => Some(TESTNET_GENESIS_BLOCK.into()),
+            Network::Mutiny => Some(MUTINY_GENESIS_BLOCK.into()),
+            _ => None,
+        }
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for Network {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+
+        Network::from_str(&s).map_err(serde::de::Error::custom)
     }
 }
 

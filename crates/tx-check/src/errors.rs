@@ -54,6 +54,9 @@ pub enum CheckError {
     #[error("Input transaction not found")]
     InputNotFound,
 
+    #[error("Transaction output not found")]
+    OutputNotFound,
+
     /// Proof mapped to not existing input or outputm, which is considered as
     /// invalid proof for that transaction.
     #[error("Proof mapped to not existing input/output")]
@@ -72,6 +75,19 @@ pub enum CheckError {
 
     #[error("Tx not found {0}")]
     TxNotFound(Txid),
+
+    #[error("Commitments result in an invalid public key")]
+    InvalidPublicKey,
+
+    #[error("Public key to verify a signature not found")]
+    PublicKeyNotFound,
+
+    #[error("Message to verify a signature not found")]
+    MessageKeyNotFound,
+
+    #[cfg(feature = "bulletproof")]
+    #[error("Transaction type is not bulletproof")]
+    NotBulletproof,
 
     #[error("Announced amount {0} does not match to amount in pixel proofs {1}")]
     AnnouncedAmountDoesNotMatch(u128, u128),

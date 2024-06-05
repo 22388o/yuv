@@ -477,22 +477,20 @@ impl<U: Wire<Event> + SetTimer + Connect + Disconnect, C: Clock + Sync> PeerMana
             } = msg;
 
             let target = self.config.target_outbound_peers;
-            // FIXME: fix this variable
-            let _trusted =
+            let trusted =
                 self.config.whitelist.contains(&addr.ip(), &user_agent) || is_local(&addr.ip());
 
             // Don't support peers with too old of a protocol version.
-            if version < crate::fsm::handler::MIN_PROTOCOL_VERSION {
+            if version < crate::fsm::handler::PROTOCOL_VERSION {
                 return Err(DisconnectReason::PeerProtocolVersion(version));
             }
 
-            // TODO: take a look on this
             // Peers that don't advertise the `NETWORK` service are not full nodes.
             // It's not so useful for us to connect to them, because they're likely
             // to be less secure.
-            // if conn.link.is_outbound() && !services.has(self.config.required_services) && !trusted {
-            //     return Err(DisconnectReason::PeerServices(services));
-            // }
+            if conn.link.is_outbound() && !services.has(self.config.required_services) && !trusted {
+                return Err(DisconnectReason::PeerServices(services));
+            }
 
             // Check for self-connections. We only need to check one link direction,
             // since in the case of a self-connection, we will see both link directions.
@@ -848,11 +846,11 @@ impl<U: Connect + Disconnect + SetTimer + Wire<Event>, C: Clock + Sync> PeerMana
     fn get_dns_seed(&self) -> &[&str] {
         // TODO: add YUV seednodes
         match self.network {
-            Network::Bitcoin => &["54.219.77.43"],
+            Network::Bitcoin => &[],
             Network::Testnet => &[],
             Network::Regtest => &[],
             Network::Signet => &[],
-            Network::Mutiny => &["54.215.221.246"],
+            Network::Mutiny => &[],
         }
     }
 

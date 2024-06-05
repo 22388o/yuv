@@ -1,6 +1,6 @@
 # config-1.toml
 [p2p]
-address = "0.0.0.0:8003" # address on which node will listen p2p connections
+address = "0.0.0.0:8002" # address on which node will listen p2p connections
 network = "regtest" # p2p network type, accepting values: mainnet, bitcoin, testnet, regtest, sigtest
 max_inbound_connections = 16 # maximum number of inbound connections
 max_outbound_connections = 8 # maximum number of outbound connections
@@ -20,7 +20,7 @@ tx_per_page = 100
 pool_size = 4 # how many checker workers will node have
 
 [bnode]
-url = "bitcoind:18443"                           # url to bitcoin node
+url = "http://bitcoind:18443"                    # url to bitcoin node
 auth = { username = "admin1", password = "123" } # bitcoin node auth
 
 [logger]

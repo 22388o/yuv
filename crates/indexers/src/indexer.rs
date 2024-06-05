@@ -5,10 +5,13 @@ use bitcoin_client::{json::GetBlockTxResult, BitcoinRpcApi, BitcoinRpcClient};
 use eyre::{bail, Context};
 use futures::TryFutureExt;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::mpsc;
+use tokio::time;
 use tokio_util::sync::CancellationToken;
 use tracing::instrument;
-use yuv_storage::BlockIndexerStorage;
+use yuv_storage::{BlockIndexerStorage, IsIndexedStorage};
+use yuv_types::{network::Network, DEFAULT_CONFIRMATIONS_NUMBER};
 
 use crate::{
     blockloader::{BlockLoaderConfig, IndexBlocksEvent},
@@ -16,45 +19,65 @@ use crate::{
     BlockLoader, IndexingParams, Subindexer,
 };
 
-const BLOCK_CHUNK_SIZE: u64 = 1000;
-
+/// The default number of indexed blocks after which a message about indexing progress is logged.
+const LOG_BLOCK_CHUNK_SIZE: u64 = 1000;
 /// Channel size between `Indexer` and `Blockloader`.  
 const LOADED_BLOCKS_CHANNEL_SIZE: usize = 1;
+/// The number of restart attempts for the `Indexer` in case of an error.
+const MAX_NUMBER_OF_RESTART_ATTEMPTS: usize = 6;
+/// The time to sleep between restart attempts of the `Indexer`.
+const RESTART_ATTEMPT_INTERVAL: Duration = Duration::from_secs(10);
 
 /// Using polling indexes blocks from Bitcoin and broadcasts it to inner indexers.
 pub struct BitcoinBlockIndexer<BS, BC>
 where
-    BS: BlockIndexerStorage,
+    BS: BlockIndexerStorage + IsIndexedStorage,
     BC: BitcoinRpcApi + Send + Sync + 'static,
 {
-    /// Bitcoin RPC Client
+    /// Bitcoin RPC Client.
     bitcoin_client: Arc<BC>,
-
-    /// Storage for block indexer
+    /// Storage for block indexer.
     storage: BS,
-
-    /// Inner indexers for block indexer
-    inner_indexers: Vec<Box<dyn Subindexer>>,
+    /// Bitcoin network
+    network: Network,
+    /// Subindexers for block indexer.
+    subindexers: Vec<Box<dyn Subindexer>>,
+    /// Contains the number of confirmations required to consider a block as confirmed.
+    confirmation_number: u8,
+    /// Contains the height of the best confirmed block.
+    confirmed_block_height: usize,
+    /// Contains the hash of the best confirmed block.
+    confirmed_block_hash: Option<BlockHash>,
 }
 
 impl<BS, BC> BitcoinBlockIndexer<BS, BC>
 where
-    BS: BlockIndexerStorage + Send + Sync + 'static,
+    BS: BlockIndexerStorage + IsIndexedStorage + Send + Sync + 'static,
     BC: BitcoinRpcApi + Send + Sync + 'static,
 {
-    pub fn new(bitcoin_client: Arc<BC>, storage: BS) -> Self {
+    pub fn new(
+        bitcoin_client: Arc<BC>,
+        storage: BS,
+        confirmation_number: Option<u8>,
+        network: Network,
+    ) -> Self {
         Self {
             bitcoin_client,
             storage,
-            inner_indexers: Vec::new(),
+            subindexers: Vec::new(),
+            confirmation_number: confirmation_number.unwrap_or(DEFAULT_CONFIRMATIONS_NUMBER),
+            confirmed_block_height: 0,
+            confirmed_block_hash: None,
+            network,
         }
     }
 
-    pub fn add_indexer<I>(&mut self, indexer: I)
+    /// Add a new [`Subindexer`] to the indexer.
+    pub fn add_subindexer<I>(&mut self, indexer: I)
     where
         I: Subindexer + Send + Sync + 'static,
     {
-        self.inner_indexers.push(Box::new(indexer));
+        self.subindexers.push(Box::new(indexer));
     }
 
     /// Start indexing missed blocks from Bitcoin.
@@ -71,14 +94,15 @@ where
         let starting_block_height = self.get_starting_block_height(&params).await?;
 
         tracing::info!(
-            from_height = starting_block_height,
-            "starting initial blocks indexing"
+            from_height = starting_block_height.saturating_sub(1),
+            "Start initial blocks indexing"
         );
 
         let block_loader = BlockLoader::new(
             bitcoin_client,
             block_loader_config.workers_number,
             block_loader_config.chunk_size,
+            self.confirmation_number,
         );
 
         let (sender_to_indexer, rx_indexer) = mpsc::channel(LOADED_BLOCKS_CHANNEL_SIZE);
@@ -89,7 +113,7 @@ where
             block_loader_config.worker_time_sleep as u64,
             cancellation.child_token(),
         ))
-        .map_err(|err| eyre::eyre!("Failed to run block loader: {}", err));
+        .map_err(|err| eyre::eyre!("failed to run block loader: {}", err));
 
         let (blockloader_result, indexer_result) = tokio::join!(
             handle,
@@ -117,40 +141,63 @@ where
             _ => {}
         }
 
-        let last_indexed_hash = self
-            .storage
-            .get_last_indexed_hash()
-            .await?
-            .unwrap_or(self.bitcoin_client.get_block_hash(0).await?);
+        let last_indexed_hash = match self.storage.get_last_indexed_hash().await? {
+            Some(block_hash) => block_hash,
+            None => self.bitcoin_client.get_block_hash(0).await?,
+        };
+
+        let last_block_info = self
+            .bitcoin_client
+            .get_block_header_info(&last_indexed_hash)
+            .await?;
+
+        self.confirmed_block_hash = Some(last_indexed_hash);
+        self.confirmed_block_height = last_block_info.height;
 
         tracing::info!(
-            "initial blocks indexing finished at block with hash {}",
-            last_indexed_hash
+            height = ?last_block_info.height,
+            block_hash = ?last_indexed_hash,
+            "Finished initial blocks indexing",
         );
+
+        self.storage.put_is_indexed().await?;
 
         Ok(())
     }
 
-    /// Return block height from indexing will start Returns 0 if [`IndexingParams
-    /// ::yuv_genesis_block_hash`] is not provided and there is no `last_indexed_hash` in storage.
-    /// Returns `last_indexed_height` if his block height is smaller than `yuv_genesis_block_height`
+    /// Returns YUV genesis block height for the given network
+    /// if [`IndexingParams::starting_block_hash`] is not provided and there is no `last_indexed_hash` in the storage.
+    /// Returns `last_indexed_height` if `starting_block_hash` is not provided
     /// and vice versa
     async fn get_starting_block_height(&self, params: &IndexingParams) -> eyre::Result<usize> {
-        let mut starting_block_height = 0;
+        // Starting block height depends on the YUV genesis block for the given network.
+        // If the genesis block is not defined for the given network, e.g. `network::Regtest`,
+        // the height is set to 0.
+        let mut starting_block_height =
+            if let Some(starting_block_by_network) = self.network.yuv_genesis_block() {
+                self.bitcoin_client
+                    .get_block_info(&starting_block_by_network)
+                    .await?
+                    .block_data
+                    .height
+            } else {
+                0
+            };
 
-        let last_indexed_hash = self.storage.get_last_indexed_hash().await?;
-        if let Some(last_indexed_hash) = last_indexed_hash {
-            let last_indexed_height = self.get_block_height(&last_indexed_hash).await?;
-            starting_block_height = last_indexed_height;
+        // Bugfix: this is a temporary condition that requires all the nodes to reindex the chain from the genesis block.
+        // TODO: remove this check in the future.
+        if self.storage.get_is_indexed().await?.is_none() {
+            return Ok(starting_block_height);
         }
 
-        let params_hash = params.yuv_genesis_block_hash;
-        if let Some(yuv_genesis_block_hash) = params_hash {
-            let yuv_genesis_block_height = self.get_block_height(&yuv_genesis_block_hash).await?;
+        if let Some(last_indexed_hash) = self.storage.get_last_indexed_hash().await? {
+            let last_indexed_height = self.get_block_height(&last_indexed_hash).await?;
+            starting_block_height = last_indexed_height + 1;
+        }
 
-            if starting_block_height < yuv_genesis_block_height {
-                starting_block_height = yuv_genesis_block_height;
-            }
+        // Starting block can be overridden by the block hash specified in the node config.
+        if let Some(staring_block_hash) = params.starting_block_hash {
+            starting_block_height = self.get_block_height(&staring_block_hash).await?;
         }
 
         Ok(starting_block_height)
@@ -158,23 +205,48 @@ where
 
     /// Run indexer in loop, polling new blocks from Bitcoin RPC.
     pub async fn run(mut self, params: RunParams, cancellation: CancellationToken) {
-        tracing::info!("starting bitcoin indexer, parameters: {:?}", params);
+        tracing::info!("Starting bitcoin indexer, parameters: {:?}", params);
 
-        let mut timer = tokio::time::interval(params.polling_period);
+        let mut timer = time::interval(params.polling_period);
+        let mut restart_number = 0;
 
         loop {
             tokio::select! {
                 _ = timer.tick() => {},
                 _ = cancellation.cancelled() => {
-                    tracing::trace!("cancellation received, stopping indexer");
+                    tracing::trace!("Cancellation received, stopping indexer");
                     return;
                 }
             }
 
             if let Err(err) = self.handle_new_blocks().await {
-                tracing::error!("failed to run indexer: {:#}", err);
+                if restart_number >= MAX_NUMBER_OF_RESTART_ATTEMPTS {
+                    tracing::error!("Indexer restart attempts number exceeded");
+                    break;
+                }
+
+                restart_number += 1;
+
+                tracing::error!(
+                    "Failed to run indexer. Restart attempt {}/{} after {}s error={:#}",
+                    restart_number,
+                    MAX_NUMBER_OF_RESTART_ATTEMPTS,
+                    RESTART_ATTEMPT_INTERVAL.as_secs(),
+                    err
+                );
+
+                timer.reset_after(RESTART_ATTEMPT_INTERVAL);
+
+                continue;
+            }
+
+            if restart_number > 0 {
+                tracing::info!("Indexer returned to normal operation");
+                restart_number = 0;
             }
         }
+
+        cancellation.cancel()
     }
 
     /// Index blocks from [`BlockLoader`]. It appears in `Indexer` init function. Handles blocks
@@ -191,10 +263,9 @@ where
         while let Some(event) = rx_indexer.recv().await {
             match event {
                 IndexBlocksEvent::FinishLoading => {
-                    tracing::info!("finished loading the blocks");
+                    tracing::debug!("Finished loading the blocks");
                     break;
                 }
-
                 IndexBlocksEvent::LoadedBlocks(blocks) => {
                     self.init_blocks_handle(blocks, &mut indexer_last_block_height)
                         .await?;
@@ -229,9 +300,9 @@ where
             *indexer_last_block_height += 1;
 
             let height = block.block_data.height;
-            tracing::trace!("indexed block at height {}", height);
-            if height as u64 % BLOCK_CHUNK_SIZE == 0 {
-                tracing::info!("indexed blocks at height: {}", height);
+            tracing::trace!("Indexed block at height {}", height);
+            if height != 0 && height as u64 % LOG_BLOCK_CHUNK_SIZE == 0 {
+                tracing::info!("Indexed blocks at height: {}", height);
             }
         }
 
@@ -240,7 +311,7 @@ where
 
     /// Takes block, indexes it and puts its hash to storage as a `last_indexed_hash`.
     async fn index_block(&mut self, block: &GetBlockTxResult) -> eyre::Result<()> {
-        for indexer in self.inner_indexers.iter_mut() {
+        for indexer in self.subindexers.iter_mut() {
             indexer
                 .index(block)
                 .await
@@ -255,62 +326,94 @@ where
     }
 
     /// Handle new block from Bitcoin RPC.
+    ///
+    /// # Flow
+    ///
+    /// 1. Check if [there is a new confirmed block].
+    ///     - If there is no new confirmed block, then return.
+    ///     - If there is a new confirmed block, then go to step 2.
+    /// 2. Get the next block by height [confirmed block height] + 1.
+    /// 3. Check if the hash of the latest confirmed block is equal to the previous hash of the new
+    ///    block.
+    /// 4. Provide the block to every subindexer and update the storage.
+    /// 5. Go to the step 1.
+    ///
+    /// [confirmed block height]: BitcoinBlockIndexer::check_new_confirmed_block
     async fn handle_new_blocks(&mut self) -> eyre::Result<()> {
-        let best_block_hash = self.get_best_block_hash().await?;
-        let mut current_block_hash = self
-            .storage
-            .get_last_indexed_hash()
-            .await?
-            .unwrap_or(best_block_hash);
-
-        if current_block_hash.eq(&best_block_hash) {
-            return Ok(());
-        }
-
-        tracing::info!(
-            best_block = ?current_block_hash,
-            "New best block, indexing...",
-        );
-
-        // Go from last indexed block height to last block
         loop {
+            if !self.check_new_confirmed_block().await? {
+                break;
+            }
+
             let block = self
-                .get_block_txs(current_block_hash)
+                .get_block_by_height(self.confirmed_block_height as u64 + 1)
                 .await
                 .wrap_err("failed to get block by hash")?;
 
-            // TODO: consider using a `TaskTracker` here. Most likely, it will
-            // require some changes in subindexers.
+            let confirmed_block_hash = self.confirmed_block_hash;
+            let new_block_previous_hash = block.block_data.previousblockhash;
+            let new_block_hash = block.block_data.hash;
+            let new_block_height = block.block_data.height;
+
+            if confirmed_block_hash != new_block_previous_hash {
+                bail!(
+                    "Latest confirmed block is not a parent of the next block to index. Possibly \
+                    the confirmation number is too low and reorg happened. Confirmed block hash: \
+                    {:?}, new confirmed block previous hash: {:?}, next block hash: {:?}",
+                    confirmed_block_hash,
+                    new_block_previous_hash,
+                    new_block_hash,
+                );
+            }
+
+            tracing::trace!(
+                height = ?new_block_height,
+                hash = ?new_block_hash,
+                "New confirmed block",
+            );
+
             self.index_block(&block).await?;
 
-            let height = block.block_data.height;
-            tracing::trace!("indexed block at height {}", height);
-
-            let Some(next_block_hash) = block.block_data.nextblockhash else {
-                break;
-            };
-
-            current_block_hash = next_block_hash;
+            self.confirmed_block_height = new_block_height;
+            self.confirmed_block_hash = Some(new_block_hash);
         }
 
         Ok(())
     }
 
+    /// Check if there is a block with height [confirmed block height] + [confirmation number], that
+    /// means there is a new confirmed block.
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(true)` if there is a new confirmed block.
+    /// - `Ok(false)` if there is no new confirmed block.
+    ///
+    /// [confirmation number]: BitcoinBlockIndexer::confirmation_number
+    /// [confirmed block height]: BitcoinBlockIndexer::confirmed_block_height
+    async fn check_new_confirmed_block(&self) -> eyre::Result<bool> {
+        let new_confirmation_height =
+            self.confirmed_block_height + self.confirmation_number as usize;
+
+        let best_block_height = self.bitcoin_client.get_block_count().await?;
+
+        Ok(new_confirmation_height <= best_block_height as usize)
+    }
+
+    /// Returns the best block height by block hash.
     async fn get_block_height(&self, hash: &BlockHash) -> eyre::Result<usize> {
         let block = self.bitcoin_client.get_block_info(hash).await?;
         Ok(block.block_data.height)
     }
 
-    /// Get best block hash
-    async fn get_best_block_hash(&self) -> eyre::Result<BlockHash> {
-        self.bitcoin_client
-            .get_best_block_hash()
-            .await
-            .wrap_err("failed to get best block hash")
+    /// Returns the block with transactions by height.
+    async fn get_block_by_height(&self, height: u64) -> eyre::Result<GetBlockTxResult> {
+        let block_hash = self.bitcoin_client.get_block_hash(height).await?;
+        self.get_block(block_hash).await
     }
 
-    /// Get block info by hash from Bitcoin RPC.
-    async fn get_block_txs(&self, hash: BlockHash) -> eyre::Result<GetBlockTxResult> {
+    /// Returns block with transactions by block hash.
+    async fn get_block(&self, hash: BlockHash) -> eyre::Result<GetBlockTxResult> {
         self.bitcoin_client
             .get_block_txs(&hash)
             .await

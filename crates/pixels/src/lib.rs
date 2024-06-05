@@ -30,6 +30,9 @@ compile_error!("at least one of the `std` or `no-std` features must be enabled")
 #[cfg(feature = "consensus")]
 mod consensus;
 
+#[cfg(feature = "bulletproof")]
+pub mod bulletproof_signing;
+
 mod errors;
 mod hash;
 mod keys;

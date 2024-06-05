@@ -94,7 +94,7 @@ impl Context {
             {
                 let mut rpc_url = rpc_url.expect("rpc_url should exist, see condition above");
                 rpc_url.push_str(&route.unwrap_or_default());
-                BitcoinRpcClient::new(rpc_auth_from_string(rpc_auth)?, rpc_url).await?
+                BitcoinRpcClient::new(rpc_auth_from_string(rpc_auth)?, rpc_url, None).await?
             }
 
             BitcoinProviderConfig::Esplora(_) => bail!(
@@ -104,7 +104,7 @@ impl Context {
             BitcoinProviderConfig::BitcoinRpc(cfg) => {
                 let mut rpc_url = cfg.url.clone();
                 rpc_url.push_str(&route.unwrap_or_default());
-                BitcoinRpcClient::new(bitcoin_rpc_auth_convert(cfg.auth), rpc_url).await?
+                BitcoinRpcClient::new(bitcoin_rpc_auth_convert(cfg.auth), rpc_url, None).await?
             }
         };
 

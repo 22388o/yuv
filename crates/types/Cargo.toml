@@ -19,6 +19,7 @@ serde = [
 ]
 messages = []
 consensus = []
+bulletproof = ["yuv-pixels/bulletproof"]
 
 [dependencies]
 yuv-pixels = { path = "../pixels", features = ["consensus"] }

@@ -1,15 +1,27 @@
 use std::collections::HashMap;
 
-use bitcoin::{self, util::key::Secp256k1, Transaction, TxIn, TxOut};
+use bitcoin::{self, secp256k1::Secp256k1, Transaction, TxIn, TxOut};
 
 #[cfg(feature = "bulletproof")]
-use yuv_pixels::k256::elliptic_curve::group::GroupEncoding;
+use {
+    bitcoin::{
+        hashes::{sha256, Hash, HashEngine},
+        secp256k1::{Message, PublicKey},
+    },
+    yuv_pixels::{
+        k256::{elliptic_curve::group::GroupEncoding, ProjectivePoint},
+        Bulletproof,
+    },
+    yuv_types::is_bulletproof,
+};
+
+use yuv_types::{AnyAnnouncement, ProofMap};
+
 use yuv_pixels::{
     CheckableProof, Chroma, P2WPKHWintessData, Pixel, PixelKey, PixelProof, ToEvenPublicKey,
 };
-use yuv_types::announcements::IssueAnnouncement;
-use yuv_types::{AnyAnnouncement, ProofMap};
-use yuv_types::{YuvTransaction, YuvTxType};
+
+use yuv_types::{announcements::IssueAnnouncement, YuvTransaction, YuvTxType};
 
 use crate::errors::CheckError;
 
@@ -67,6 +79,13 @@ pub(crate) fn check_issue_isolated(
             })?;
     }
 
+    check_issue_conservation_rules(&gathered_outputs, tx)?;
+
+    #[cfg(feature = "bulletproof")]
+    if is_bulletproof(output_proofs.values().collect::<Vec<&PixelProof>>()) {
+        return Ok(());
+    }
+
     let total_amount = output_proofs
         .values()
         .map(|proof| proof.pixel().luma.amount)
@@ -78,8 +97,6 @@ pub(crate) fn check_issue_isolated(
             total_amount,
         ));
     }
-
-    check_issue_conservation_rules(&gathered_outputs, tx)?;
 
     Ok(())
 }
@@ -142,9 +159,9 @@ pub(crate) fn check_transfer_isolated(
     }
 
     #[cfg(feature = "bulletproof")]
-    if is_bulletproof(inputs, outputs)? {
-        are_commitments_equal(inputs, outputs)?;
-        return Ok(());
+    if let Some((inputs_bulletproof, outputs_bulletproof)) = extract_bulletproofs(inputs, outputs)?
+    {
+        return check_bulletproof_conservation_rules(inputs_bulletproof, outputs_bulletproof);
     }
 
     check_transfer_conservation_rules(&gathered_inputs, &gathered_outputs)?;
@@ -313,57 +330,175 @@ pub(crate) fn find_issuer_in_txinputs<'a>(inputs: &'a [TxIn], chroma: &Chroma) -
 }
 
 #[cfg(feature = "bulletproof")]
-fn is_bulletproof(inputs: &ProofMap, outputs: &ProofMap) -> Result<bool, CheckError> {
+type ExtractedBulletproofs = Option<(Vec<Bulletproof>, Vec<Bulletproof>)>;
+
+/// Check that the proofs are bulletproofs and extract them.
+#[cfg(feature = "bulletproof")]
+fn extract_bulletproofs(
+    inputs: &ProofMap,
+    outputs: &ProofMap,
+) -> Result<ExtractedBulletproofs, CheckError> {
     let mut was_found = false;
-    for proof in inputs.values().chain(outputs.values()) {
-        if proof.is_empty_pixelproof() {
-            continue;
-        }
 
-        let is_bulletproof = proof.is_bulletproof();
+    let inputs_bulletproofs = proof_map_to_bulletproofs(&mut was_found, inputs)?;
+    let outputs_bulletproofs = proof_map_to_bulletproofs(&mut was_found, outputs)?;
 
-        if was_found && !is_bulletproof {
-            return Err(CheckError::MixedBulletproofsAndNonBulletproofs);
-        }
-
-        if is_bulletproof {
-            was_found = true;
-        }
-    }
-
-    Ok(was_found)
+    Ok(match (inputs_bulletproofs, outputs_bulletproofs) {
+        (Some(inputs), Some(outputs)) => Some((inputs, outputs)),
+        _ => None,
+    })
 }
 
 #[cfg(feature = "bulletproof")]
-fn are_commitments_equal(
-    inputs_proofs: &ProofMap,
-    outputs_proofs: &ProofMap,
-) -> Result<bool, CheckError> {
-    let (owners, commits): (Vec<_>, Vec<_>) = inputs_proofs
+fn proof_map_to_bulletproofs(
+    was_found: &mut bool,
+    proofs: &ProofMap,
+) -> Result<Option<Vec<Bulletproof>>, CheckError> {
+    proofs
+        .values()
+        .filter(|proof| !proof.is_empty_pixelproof())
+        .map(|pixel_proof| match pixel_proof.get_bulletproof() {
+            Some(bulletproof) => {
+                *was_found = true;
+                Ok(Some(bulletproof.clone()))
+            }
+            None => {
+                if *was_found {
+                    Err(CheckError::MixedBulletproofsAndNonBulletproofs)
+                } else {
+                    Ok(None)
+                }
+            }
+        })
+        .collect::<Result<Option<Vec<Bulletproof>>, CheckError>>()
+}
+
+#[cfg(feature = "bulletproof")]
+fn check_bulletproof_conservation_rules(
+    inputs_proofs: Vec<yuv_pixels::Bulletproof>,
+    outputs_proofs: Vec<yuv_pixels::Bulletproof>,
+) -> Result<(), CheckError> {
+    // Derive the public key to verify the general signature.
+    let general_xonly = derive_pubkey(&inputs_proofs, &outputs_proofs, |_p| true)?;
+
+    let mut engine = sha256::Hash::engine();
+    let mut chroma_engines: HashMap<Chroma, sha256::HashEngine> = HashMap::new();
+    let mut chroma_xonlys: HashMap<Chroma, bitcoin::XOnlyPublicKey> = HashMap::new();
+    let chromas = inputs_proofs
         .iter()
-        .chain(outputs_proofs.iter())
-        .filter(|(_, proof)| !proof.is_empty_pixelproof())
-        .map(|(_, proof)| {
-            let proof = proof
-                .get_bulletproof()
-                .expect("Bulletproofs should be checked");
+        .map(|proof| proof.pixel.chroma)
+        .collect::<std::collections::BTreeSet<Chroma>>();
 
-            (proof.commiter, proof.commitment)
-        })
-        .unzip();
+    // Derive the public keys to verify the signatures for each `Chroma`.
+    for chroma in chromas {
+        let chroma_xonly = derive_pubkey(&inputs_proofs, &outputs_proofs, |p| {
+            p.pixel.chroma == chroma
+        })?;
 
-    let merged_owner = owners
+        chroma_xonlys.insert(chroma, chroma_xonly);
+    }
+
+    let mut sorted_inputs = inputs_proofs;
+    sorted_inputs.sort_by(|a, b| {
+        a.pixel
+            .luma
+            .to_bytes()
+            .partial_cmp(&b.pixel.luma.to_bytes())
+            .unwrap()
+    });
+
+    for proof in sorted_inputs.iter().chain(outputs_proofs.iter()) {
+        engine.input(&proof.pixel.luma.to_bytes());
+
+        chroma_engines
+            .entry(proof.pixel.chroma)
+            .or_default()
+            .input(&proof.pixel.luma.to_bytes());
+    }
+
+    let message = Message::from_hashed_data::<sha256::Hash>(&sha256::Hash::from_engine(engine));
+    let messages = chroma_engines
         .into_iter()
-        .reduce(|acc, owner| {
-            acc.combine(&owner.negate(&Secp256k1::new()))
-                .expect("Owners should be valid")
+        .map(|(chroma, engine)| {
+            (
+                chroma,
+                Message::from_hashed_data::<sha256::Hash>(&sha256::Hash::from_engine(engine)),
+            )
         })
-        .ok_or(CheckError::AtLeastOneCommitment)?;
+        .collect::<HashMap<Chroma, Message>>();
 
-    let raw_merged_commit = commits
-        .into_iter()
-        .reduce(|acc, commit| acc - commit)
-        .ok_or(CheckError::AtLeastOneCommitment)?;
+    for proof in &outputs_proofs {
+        verify_signatures(proof, &chroma_xonlys, &messages, &message, general_xonly)?;
+    }
 
-    Ok(merged_owner.serialize() == raw_merged_commit.to_bytes().as_slice())
+    Ok(())
+}
+
+#[cfg(feature = "bulletproof")]
+fn verify_signatures(
+    proof: &Bulletproof,
+    chroma_xonlys: &HashMap<Chroma, bitcoin::XOnlyPublicKey>,
+    chroma_messages: &HashMap<Chroma, Message>,
+    message: &Message,
+    general_xonly: bitcoin::XOnlyPublicKey,
+) -> Result<(), CheckError> {
+    let ctx = Secp256k1::new();
+    let chroma = proof.pixel.chroma;
+    let chroma_xonly = chroma_xonlys
+        .get(&chroma)
+        .ok_or(CheckError::PublicKeyNotFound)?;
+
+    let chroma_message = chroma_messages
+        .get(&chroma)
+        .ok_or(CheckError::MessageKeyNotFound)?;
+
+    ctx.verify_schnorr(&proof.signature, message, &general_xonly)
+        .map_err(|_e| CheckError::ConservationRulesViolated)?;
+
+    ctx.verify_schnorr(&proof.chroma_signature, chroma_message, chroma_xonly)
+        .map_err(|_e| CheckError::ConservationRulesViolated)?;
+
+    Ok(())
+}
+
+#[cfg(feature = "bulletproof")]
+fn derive_pubkey(
+    inputs_proofs: &[Bulletproof],
+    outputs_proofs: &[Bulletproof],
+    filter: impl Fn(&Bulletproof) -> bool,
+) -> Result<bitcoin::XOnlyPublicKey, CheckError> {
+    let inputs_commitment = combine_commitments(
+        ProjectivePoint::default(),
+        inputs_proofs,
+        &|p1, p2| p1 + p2,
+        &filter,
+    );
+
+    let pubkey_commitment = combine_commitments(
+        inputs_commitment,
+        outputs_proofs,
+        &|p1, p2| p1 - p2,
+        &filter,
+    );
+
+    let (xonly, _parity) = PublicKey::from_slice(pubkey_commitment.to_bytes().as_slice())
+        .map_err(|_| CheckError::InvalidPublicKey)?
+        .x_only_public_key();
+
+    Ok(xonly)
+}
+
+#[cfg(feature = "bulletproof")]
+fn combine_commitments(
+    init_point: ProjectivePoint,
+    proofs: &[Bulletproof],
+    op: &impl Fn(ProjectivePoint, ProjectivePoint) -> ProjectivePoint,
+    filter: &impl Fn(&Bulletproof) -> bool,
+) -> ProjectivePoint {
+    proofs
+        .iter()
+        .filter(|proof| filter(proof))
+        .fold(init_point, |acc, bulletproof| {
+            op(acc, bulletproof.commitment)
+        })
 }

@@ -3,6 +3,9 @@ use bitcoin::Transaction;
 use crate::announcements::{Announcement, IssueAnnouncement};
 use crate::ProofMap;
 
+#[cfg(feature = "bulletproof")]
+use crate::is_bulletproof;
+
 /// Represents entries of the YUV transaction inside the node's storage and
 /// P2P communication inventory
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -18,6 +21,17 @@ impl YuvTransaction {
         Self {
             bitcoin_tx,
             tx_type,
+        }
+    }
+
+    /// Checks if the transaction is bulletproof.
+    ///
+    /// Returns `true` if it is a bulletproof transaction, `false` otherwise.
+    #[cfg(feature = "bulletproof")]
+    pub fn is_bulletproof(&self) -> bool {
+        match self.tx_type.output_proofs() {
+            Some(proofs) => is_bulletproof(proofs.values()),
+            None => false,
         }
     }
 }

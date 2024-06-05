@@ -148,14 +148,15 @@ impl Account {
             .choose(&mut thread_rng())
             .expect("Recipients should not be empty");
 
-        let balances = self.wallet.balances();
+        let balances = self.wallet.balances().await?;
         // If there are no YUV tokens, issue some to the previously picked recipient.
         // Else send a transfer TX.
-        if balances.is_empty() {
+        if balances.yuv.is_empty() {
             self.issue(recipient).await
         } else {
             // Pick random Chroma and Luma.
             let (chroma, luma) = balances
+                .yuv
                 .iter()
                 .choose(&mut thread_rng())
                 .expect("At least one pixel should be present");
@@ -222,8 +223,8 @@ impl Account {
     ) -> eyre::Result<()> {
         self.wallet.sync(SyncOptions::yuv_only()).await?;
 
-        let balances = self.wallet.balances();
-        balance_sender.send((self.private_key(), balances))?;
+        let balances = self.wallet.balances().await?;
+        balance_sender.send((self.private_key(), balances.yuv))?;
 
         Ok(())
     }

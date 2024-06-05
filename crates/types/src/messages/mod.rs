@@ -31,7 +31,7 @@ pub enum ControllerMessage {
     /// Send signed transactions for on-chain confirmation.
     ConfirmBatchTx(Vec<YuvTransaction>),
     /// Remove checked announcement from handling transactions.
-    HandleAnnouncement(Txid),
+    CheckedAnnouncement(Txid),
     /// New inventory to share with peers.
     AttachedTxs(Vec<Txid>),
     /// Data that is received from p2p.
@@ -85,20 +85,8 @@ pub enum GraphBuilderMessage {
 /// Message to ConfirmationIndexer.
 #[derive(Clone, Debug, Event)]
 pub enum TxConfirmMessage {
-    /// Send transactions for confirmation.
-    ConfirmBatchTx(TxsToConfirm),
-}
-
-/// Transactions to be sent to the `TxConfirmator`.
-#[derive(Clone, Debug)]
-pub enum TxsToConfirm {
-    /// List of Yuv transactions.
-    ///
-    /// Expected to come from the RPC and P2P.
-    YuvTxs(Vec<YuvTransaction>),
-
-    /// List of Txids.
-    ///
-    /// Expected to come from the confirmation subindexer.
-    Txids(Vec<Txid>),
+    /// Transactions that should be confirmed before sending to the tx checker.
+    TxsToConfirm(Vec<YuvTransaction>),
+    /// Transactions that are confirmed.
+    ConfirmedTxIds(Vec<Txid>),
 }

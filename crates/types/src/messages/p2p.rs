@@ -5,6 +5,10 @@ use std::io::{self, Read};
 use crate::consensus::{InventoryWrapper, YuvTxsWrapper};
 
 use crate::YuvTransaction;
+use alloc::vec::Vec;
+
+#[cfg(feature = "consensus")]
+use alloc::vec;
 
 #[cfg(feature = "consensus")]
 use bitcoin::consensus::{

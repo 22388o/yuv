@@ -13,9 +13,9 @@ use crate::wip::{WipProof, WipStmt};
 
 /// Commit to a value with a blinding factor.
 ///
-/// v * G + r * H
+/// v * H + r * G
 pub fn commit(v: k256::Scalar, r: k256::Scalar) -> k256::ProjectivePoint {
-    (*G * v) + (*H * r)
+    (*H * v) + (*G * r)
 }
 
 /// Proof that a value is in the range [0, 2^128).
@@ -139,13 +139,13 @@ fn calculate_a_terms(
 ) -> Vec<(k256::Scalar, k256::ProjectivePoint)> {
     let mut output = vec![];
     for (i, a_l) in a_l.iter().enumerate() {
-        output.push((*a_l, G_BOLD1[i]));
+        output.push((*a_l, H_BOLD1[i]));
     }
     for (i, a_r) in a_r.iter().enumerate() {
-        output.push((*a_r, H_BOLD1[i]));
+        output.push((*a_r, G_BOLD1[i]));
     }
 
-    output.push((alpha, *H));
+    output.push((alpha, *G));
 
     output
 }
@@ -178,8 +178,8 @@ fn calculate_a_hat(
     let powers_y_inv = powers.mul_all(&y_vec_inv);
     let mut a_terms = Vec::with_capacity((RANGE_PROOF_SIZE * 2) + 2);
     for (i, scalar) in powers_y_inv.add(&z).drain(..).enumerate() {
-        a_terms.push((-z, G_BOLD1[i]));
-        a_terms.push((scalar, H_BOLD1[i]));
+        a_terms.push((-z, H_BOLD1[i]));
+        a_terms.push((scalar, G_BOLD1[i]));
     }
 
     a_terms.push((y_inv_mul, v));
@@ -188,7 +188,7 @@ fn calculate_a_hat(
     let last_term =
         (y_sum * z) - (powers.iter().sum::<k256::Scalar>() * y_inv_mul * z) - (y_sum * z.square());
 
-    a_terms.push((last_term, *G));
+    a_terms.push((last_term, *H));
 
     (
         powers_y_inv,

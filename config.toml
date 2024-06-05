@@ -1,0 +1,39 @@
+[p2p]
+address = "0.0.0.0:8002" # address on which node will listen p2p connections
+network = "bitcoin" # p2p network type, accepting values: mainnet, bitcoin, testnet, regtest, sigtest
+max_inbound_connections = 16 # maximum number of inbound connections
+max_outbound_connections = 8 # maximum number of outbound connections
+bootnodes = [] # list of ip addresses of nodes to connect
+
+[rpc]
+address = "0.0.0.0:18333" # address on which RPC API will be served.
+max_items_per_request = 1 # items limitation in the list requests
+
+[storage]
+path = "./.yuvd/1" # path to directory with stored txs.
+create_if_missing = true # Create database if missing with all missing directories in path
+tx_per_page = 100 # Number of transactions per one page return by `getlistrawyuvtransactions`
+flush_period = 100 # responds for the saving data period (in sececonds) 
+
+[checkers]
+pool_size = 4 # how many checker workers will node have
+
+[bnode]
+url = "http://localhost:3000/" # url to bitcoin node
+auth = { username = "hungry-booth", password = "huff-folic-wiring-baking-scroll-sneak" } # bitcoin node auth
+
+[logger]
+level = "INFO" # level logging, accepting values: TRACE, DEBUG, INFO, WARN, ERROR
+
+[indexer]
+# Number of blocks to index again (subtract from height of last indexed block).
+index_step_back = 1
+# blockhash from which the indexer indexes blocks
+starting_block = "00000000000000000002b09953fb1fb19e2b339738548848ccee011021fd812c"
+polling_period = { secs = 5, nanos = 0 } # interval between indexer runs
+# max time after each transaction should be discarded from pool
+max_confirmation_time = { secs = 86400, nanos = 0 } 
+
+[controller]
+max_inv_size = 100 # max number of txs in inv message
+inv_sharing_interval = 10 # interval between inv messages

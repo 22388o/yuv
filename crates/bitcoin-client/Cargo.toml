@@ -19,5 +19,5 @@ thiserror = { workspace = true }
 
 mockall = { workspace = true, optional = true }
 
-jsonrpc-async = { version = "2.0.2" }
+jsonrpc = { path = "../jsonrpc", features = ["reqwest_http"] }
 log = { version = "0.4.20" }

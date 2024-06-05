@@ -14,3 +14,11 @@ pub struct TransferProofs {
     pub input: ProofMap,
     pub output: ProofMap,
 }
+
+/// Checks if any of the proofs is bulletproof.
+#[cfg(feature = "bulletproof")]
+pub fn is_bulletproof<'a>(proofs: impl IntoIterator<Item = &'a PixelProof>) -> bool {
+    proofs
+        .into_iter()
+        .any(|pixel_proof| pixel_proof.is_bulletproof())
+}

@@ -4,14 +4,18 @@ use std::{
     sync::{Arc, RwLock},
 };
 
-#[cfg(feature = "bulletproof")]
-use bitcoin::Txid;
 use bitcoin::{
     psbt::{self, serialize::Serialize},
     secp256k1::{self, All, Secp256k1},
     OutPoint, PrivateKey, PublicKey, Script, Transaction, TxOut, XOnlyPublicKey,
 };
 use eyre::{bail, eyre, Context, OptionExt};
+#[cfg(feature = "bulletproof")]
+use {
+    bitcoin::secp256k1::schnorr::Signature,
+    yuv_pixels::{k256::ProjectivePoint, Luma, RangeProof},
+    yuv_types::is_bulletproof,
+};
 
 use bdk::{
     blockchain::Blockchain,
@@ -21,12 +25,11 @@ use bdk::{
     FeeRate as BdkFeeRate, SignOptions,
 };
 
-#[cfg(feature = "bulletproof")]
-use yuv_pixels::{k256::ProjectivePoint, Luma, RangeProof};
 use yuv_pixels::{
     Chroma, EmptyPixelProof, MultisigPixelProof, Pixel, PixelKey, PixelProof, SigPixelProof,
     ToEvenPublicKey,
 };
+
 use yuv_storage::TransactionsStorage as YuvTransactionsStorage;
 use yuv_types::{announcements::IssueAnnouncement, AnyAnnouncement};
 use yuv_types::{ProofMap, YuvTransaction, YuvTxType};
@@ -39,7 +42,13 @@ use crate::{
     Wallet,
 };
 
+#[cfg(feature = "bulletproof")]
+mod bulletproof;
+#[cfg(feature = "bulletproof")]
+pub use bulletproof::BulletproofRecipientParameters;
+
 #[allow(clippy::large_enum_variant)]
+#[derive(Debug)]
 enum BuilderInput {
     Multisig2x2 {
         outpoint: OutPoint,
@@ -70,6 +79,7 @@ impl BuilderInput {
 }
 
 #[allow(clippy::large_enum_variant)]
+#[derive(Debug)]
 enum BuilderOutput {
     Satoshis {
         satoshis: u64,
@@ -92,11 +102,13 @@ enum BuilderOutput {
     BulletproofPixel {
         chroma: Chroma,
         recipient: PublicKey,
+        sender: PublicKey,
         luma: Luma,
         satoshis: u64,
         commitment: ProjectivePoint,
-        committer: PublicKey,
         proof: RangeProof,
+        signature: Signature,
+        chroma_signature: Signature,
     },
 }
 
@@ -157,6 +169,14 @@ struct TransactionBuilder<YuvTxsDatabase, BitcoinTxsDatabase> {
     /// Storage of outputs which will be formed into transaction outputs and
     /// proofs.
     outputs: Vec<BuilderOutput>,
+
+    /// Storage of bulletproof outputs that will be mapped to `self.outputs` and then into transaction outputs and
+    /// proofs.
+    ///
+    /// `OutPoint` is an `Option` as it may be absent in case the transaction is an issuance.
+    #[cfg(feature = "bulletproof")]
+    bulletproof_outputs:
+        BTreeMap<Option<OutPoint>, Vec<(Chroma, bulletproof::BulletproofRecipientParameters)>>,
 
     /// Storage of inputs which will be formed into transaction inputs and
     /// proofs.
@@ -310,30 +330,6 @@ where
         self
     }
 
-    /// Add recipient to the transaction with bulletproof.
-    #[cfg(feature = "bulletproof")]
-    pub fn add_recipient_with_bulletproof(
-        &mut self,
-        recipient: &secp256k1::PublicKey,
-        proof_hash: [u8; 32],
-        satoshis: u64,
-        commitment: ProjectivePoint,
-        committer: &PublicKey,
-        proof: RangeProof,
-    ) -> eyre::Result<&mut Self> {
-        self.0.add_recipient_with_bulletproof(
-            self.0.issuance_chroma(),
-            recipient,
-            proof_hash,
-            satoshis,
-            commitment,
-            committer,
-            proof,
-        )?;
-
-        Ok(self)
-    }
-
     /// Finish issuance building, and create Bitcoin transactions with attached
     /// proofs for it in [`YuvTransaction`].
     pub async fn finish(self, blockchain: &impl Blockchain) -> eyre::Result<YuvTransaction> {
@@ -455,32 +451,6 @@ where
         self
     }
 
-    /// Add recipient to the transaction with bulletproof.
-    #[cfg(feature = "bulletproof")]
-    pub fn add_recipient_with_bulletproof(
-        &mut self,
-        chroma: Chroma,
-        recipient: &secp256k1::PublicKey,
-        proof_hash: [u8; 32],
-        satoshis: u64,
-        commitment: ProjectivePoint,
-        committer: &PublicKey,
-        proof: RangeProof,
-    ) -> eyre::Result<&mut Self> {
-        self.0.add_recipient_with_bulletproof(
-            chroma, recipient, proof_hash, satoshis, commitment, committer, proof,
-        )?;
-
-        Ok(self)
-    }
-
-    /// Add input to the transaction.
-    #[cfg(feature = "bulletproof")]
-    pub fn add_bulletproof_input(&mut self, txid: Txid, vout: u32) -> &mut Self {
-        self.0.add_bulletproof_input(txid, vout);
-        self
-    }
-
     /// Finish transfer building, and create Bitcoin transactions with attached
     /// proofs for it in [`YuvTransaction`].
     pub async fn finish(self, blockchain: &impl Blockchain) -> eyre::Result<YuvTransaction> {
@@ -508,6 +478,8 @@ where
             yuv_txs_storage: wallet.yuv_txs_storage.clone(),
             yuv_utxos: wallet.utxos.clone(),
             outputs: Vec::new(),
+            #[cfg(feature = "bulletproof")]
+            bulletproof_outputs: BTreeMap::new(),
             inputs: Vec::new(),
             tx_signer: TransactionSigner::new(ctx, wallet.signer_key),
             is_inputs_selected: false,
@@ -521,43 +493,6 @@ where
     YTDB: YuvTransactionsStorage + Clone + Send + Sync + 'static,
     BDB: bdk::database::BatchDatabase + Clone + Send,
 {
-    /// Add input to the transaction.
-    #[cfg(feature = "bulletproof")]
-    fn add_bulletproof_input(&mut self, txid: Txid, vout: u32) -> &mut Self {
-        let input = BuilderInput::BulletproofPixel {
-            outpoint: OutPoint { txid, vout },
-        };
-
-        self.inputs.push(input);
-
-        self
-    }
-
-    /// Add recipient to the transaction with bulletproof.
-    #[cfg(feature = "bulletproof")]
-    fn add_recipient_with_bulletproof(
-        &mut self,
-        chroma: Chroma,
-        recipient: &secp256k1::PublicKey,
-        proof_hash: [u8; 32],
-        satoshis: u64,
-        commitment: ProjectivePoint,
-        committer: &PublicKey,
-        proof: RangeProof,
-    ) -> eyre::Result<&mut Self> {
-        self.outputs.push(BuilderOutput::BulletproofPixel {
-            chroma,
-            recipient: recipient.to_public_key(),
-            luma: proof_hash.into(),
-            satoshis,
-            commitment,
-            committer: *committer,
-            proof,
-        });
-
-        Ok(self)
-    }
-
     fn add_sats_recipient(&mut self, recipient: &secp256k1::PublicKey, satoshis: u64) -> &mut Self {
         self.outputs.push(BuilderOutput::Satoshis {
             satoshis,
@@ -782,7 +717,8 @@ where
         let mut sum = 0u128;
 
         for input in &self.inputs {
-            let (proof, _output) = self.get_output_from_storage(input.outpoint()).await?;
+            let (proof, _output) =
+                get_output_from_storage(&self.yuv_txs_storage, input.outpoint()).await?;
             let pixel = proof.pixel();
 
             if pixel.chroma != chroma {
@@ -791,33 +727,10 @@ where
 
             sum = sum
                 .checked_add(pixel.luma.amount)
-                .ok_or_else(|| eyre!("Inputs sum overflow"))?;
+                .ok_or_eyre("Inputs sum overflow")?;
         }
 
         Ok(sum)
-    }
-
-    async fn get_output_from_storage(
-        &self,
-        OutPoint { txid, vout }: OutPoint,
-    ) -> eyre::Result<(PixelProof, TxOut)> {
-        let Some(tx) = self.yuv_txs_storage.get_yuv_tx(&txid).await? else {
-            bail!("Transaction is not found in synced YUV txs: {}", txid);
-        };
-
-        let Some(output_proofs) = tx.tx_type.output_proofs() else {
-            bail!("Transaction {} has not output proofs", txid);
-        };
-
-        let Some(proof) = output_proofs.get(&vout) else {
-            bail!("Input is not found in synced YUV txs: {}:{}", txid, vout);
-        };
-
-        let Some(output) = tx.bitcoin_tx.output.get(vout as usize) else {
-            bail!("Transaction output not found: {}:{}", txid, vout);
-        };
-
-        Ok((proof.clone(), output.clone()))
     }
 
     /// Form [`WeightedUtxo`] for YUV coins from given [`OutPoint`]s from
@@ -830,8 +743,13 @@ where
         let mut weighted_utxos = Vec::new();
 
         for outpoint in utxos {
-            let (proof, output) = self.get_output_from_storage(outpoint).await?;
+            let (proof, output) = get_output_from_storage(&self.yuv_txs_storage, outpoint).await?;
             let pixel = proof.pixel();
+
+            #[cfg(feature = "bulletproof")]
+            if proof.is_bulletproof() {
+                continue;
+            }
 
             if pixel.chroma != chroma {
                 continue;
@@ -996,13 +914,6 @@ where
     async fn build_tx(mut self, fee_rate: BdkFeeRate) -> eyre::Result<YuvTransaction> {
         let ctx = Secp256k1::new();
 
-        // Gather output `script_pubkeys` with satoshis and profos for BDK wallet.
-        let mut output_proofs = Vec::new();
-        let mut outputs = Vec::new();
-
-        for output in &self.outputs {
-            self.process_output(output, &mut output_proofs, &mut outputs)?;
-        }
         // Gather inputs as foreighn utxos with proofs for BDK wallet.
         let mut input_proofs = HashMap::new();
         let mut inputs = Vec::new();
@@ -1010,8 +921,31 @@ where
         self.process_inputs(&ctx, &mut input_proofs, &mut inputs)
             .await?;
 
+        #[cfg(feature = "bulletproof")]
+        if !self.bulletproof_outputs.is_empty() {
+            self.process_bulletproof_outputs(
+                &input_proofs
+                    .iter()
+                    .filter_map(|(outpoint, proof)| {
+                        proof
+                            .get_bulletproof()
+                            .map(|bulletproof| (*outpoint, bulletproof.clone()))
+                    })
+                    .collect(),
+            )?;
+        }
+
+        // Gather output `script_pubkeys` with satoshis and profos for BDK wallet.
+        let mut output_proofs = Vec::new();
+        let mut outputs = Vec::new();
+
+        for output in &self.outputs {
+            self.process_output(output, &mut output_proofs, &mut outputs)?;
+        }
+
         let bitcoin_wallet = self.inner_wallet.read().unwrap();
         let mut tx_builder = bitcoin_wallet.build_tx();
+
         // Do not sort inputs and outputs to make proofs valid
         tx_builder.ordering(TxOrdering::Untouched);
         tx_builder.only_witness_utxo();
@@ -1088,11 +1022,24 @@ where
         input_proofs: &mut HashMap<OutPoint, PixelProof>,
         inputs: &mut Vec<(OutPoint, psbt::Input, usize)>,
     ) -> eyre::Result<()> {
+        #[cfg(feature = "bulletproof")]
+        if !self.bulletproof_outputs.is_empty() {
+            let outpoints = self
+                .bulletproof_outputs
+                .keys()
+                .copied()
+                .collect::<Vec<Option<OutPoint>>>();
+
+            for outpoint in outpoints.into_iter().flatten() {
+                self.add_bulletproof_input(outpoint.txid, outpoint.vout);
+            }
+        }
+
         for input in &self.inputs {
             let outpoint = input.outpoint();
 
             // Get proof for that input from synced transactions
-            let (proof, output) = self.get_output_from_storage(outpoint).await?;
+            let (proof, output) = get_output_from_storage(&self.yuv_txs_storage, outpoint).await?;
 
             input_proofs.insert(outpoint, proof.clone());
 
@@ -1244,11 +1191,13 @@ where
             BuilderOutput::BulletproofPixel {
                 chroma,
                 recipient,
+                sender,
                 luma,
                 satoshis,
                 commitment,
-                committer,
                 proof,
+                signature,
+                chroma_signature,
             } => {
                 let pixel = Pixel::new(*luma, *chroma);
 
@@ -1257,9 +1206,11 @@ where
                 let pixel_proof = PixelProof::bulletproof(
                     pixel,
                     recipient.inner,
+                    sender.inner,
                     *commitment,
-                    committer.inner,
                     proof.clone(),
+                    *signature,
+                    *chroma_signature,
                 );
 
                 let script = Script::new_v0_p2wpkh(
@@ -1281,16 +1232,47 @@ where
     }
 }
 
+pub(crate) async fn get_output_from_storage<YTDB>(
+    yuv_txs_storage: &YTDB,
+    OutPoint { txid, vout }: OutPoint,
+) -> eyre::Result<(PixelProof, TxOut)>
+where
+    YTDB: YuvTransactionsStorage + Clone + Send + Sync + 'static,
+{
+    let Some(tx) = yuv_txs_storage.get_yuv_tx(&txid).await? else {
+        bail!("Transaction is not found in synced YUV txs: {}", txid);
+    };
+
+    let Some(output_proofs) = tx.tx_type.output_proofs() else {
+        bail!("Transaction {} has no output proofs", txid);
+    };
+
+    let Some(proof) = output_proofs.get(&vout) else {
+        bail!("Input is not found in synced YUV txs: {}:{}", txid, vout);
+    };
+
+    let Some(output) = tx.bitcoin_tx.output.get(vout as usize) else {
+        bail!("Transaction output not found: {}:{}", txid, vout);
+    };
+
+    Ok((proof.clone(), output.clone()))
+}
+
 pub fn form_issue_announcement(output_proofs: Vec<PixelProof>) -> eyre::Result<IssueAnnouncement> {
     let filtered_proofs = output_proofs
-        .into_iter()
+        .iter()
         .filter(|proof| !proof.is_empty_pixelproof())
-        .collect::<Vec<PixelProof>>();
+        .collect::<Vec<&PixelProof>>();
 
     let chroma = filtered_proofs
         .first()
         .map(|proof| proof.pixel().chroma)
         .ok_or_eyre("issuance with no outputs")?;
+
+    #[cfg(feature = "bulletproof")]
+    if is_bulletproof(filtered_proofs.clone()) {
+        return Ok(IssueAnnouncement { chroma, amount: 0 });
+    }
 
     let outputs_sum = filtered_proofs
         .iter()

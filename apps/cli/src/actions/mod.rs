@@ -160,3 +160,14 @@ async fn execute_command(command: Commands, context: Context) -> eyre::Result<()
         Cmd::Chroma(cmd) => chroma::run(cmd, context).await,
     }
 }
+
+/// Checks if all the arguments to the command are specified the same number of times.
+#[macro_export]
+macro_rules! check_equal_lengths {
+    ($($args:expr),+ $(,)?) => {
+        {
+            let lengths = [$($args.len()),+];
+            eyre::ensure!(lengths.iter().all(|&len| len == lengths[0]), "The number of the repeated arguments must match")
+        }
+    };
+}

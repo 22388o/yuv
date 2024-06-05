@@ -24,9 +24,6 @@ pub struct IndexerConfig {
     #[serde(default)]
     pub starting_block: Option<BlockHash>,
 
-    #[serde(default)]
-    pub step_back: Option<u64>,
-
     #[serde(default = "default_max_confirmation_time")]
     pub max_confirmation_time: Duration,
 
@@ -41,6 +38,9 @@ pub struct IndexerConfig {
 
     #[serde(default = "default_max_restart_attempts")]
     pub max_restart_attempts: u32,
+
+    #[serde(default)]
+    pub confirmations_number: Option<u8>,
 }
 
 fn default_polling_period() -> Duration {
@@ -65,11 +65,8 @@ fn default_clean_up_interval() -> Duration {
 
 impl From<IndexerConfig> for IndexingParams {
     fn from(value: IndexerConfig) -> Self {
-        let def = IndexingParams::default();
-
         Self {
-            yuv_genesis_block_hash: value.starting_block,
-            index_step_back: value.step_back.unwrap_or(def.index_step_back),
+            starting_block_hash: value.starting_block,
         }
     }
 }
@@ -79,12 +76,12 @@ impl Default for IndexerConfig {
         Self {
             polling_period: default_polling_period(),
             starting_block: Default::default(),
-            step_back: Default::default(),
             max_confirmation_time: default_max_confirmation_time(),
             blockloader: BlockLoaderConfig::default(),
             restart_interval: default_restart_interval(),
             max_restart_attempts: default_max_restart_attempts(),
             clean_up_interval: default_clean_up_interval(),
+            confirmations_number: Default::default(),
         }
     }
 }
