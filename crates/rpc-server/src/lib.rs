@@ -14,13 +14,6 @@ use crate::transactions::TransactionsController;
 
 pub mod transactions;
 
-/// The average YUV tx size in bytes
-///
-/// Includes average Bitcoin tx size (300-400 bytes) and average number
-/// of proofs for inputs and outputs (3-6) with their sizes (64 bytes for
-/// single sig proof of each input and output). Rounded to 1 kilobyte.
-const AVERAGE_TX_SIZE: usize = 1024;
-
 pub struct ServerConfig {
     /// Address at which the server will listen for incoming connections.
     pub address: String,

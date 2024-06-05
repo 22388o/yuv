@@ -7,16 +7,6 @@ on:
   workflow_dispatch:
 
 jobs:
-  setup: 
-    name: Checkout and Rust Setup
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout sources
-        uses: actions/checkout@v4
-
-      - name: Rust Setup
-        uses: ./.github/actions/rust-setup 
-
   release-windows:
     env:
       VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
@@ -34,7 +24,6 @@ jobs:
 
     timeout-minutes: 30
 
-    needs: [setup]
     steps:
       - name: Export GitHub Actions cache environment variables
         uses: actions/github-script@v7
@@ -80,7 +69,6 @@ jobs:
     timeout-minutes: 15
     runs-on: ${{ matrix.os }}
 
-    needs: [setup]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4

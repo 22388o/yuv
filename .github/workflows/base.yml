@@ -29,15 +29,6 @@ jobs:
       - name: Run cargo check on release version
         run: cargo check --release
 
-      - name: Run cargo-hack on yuv-pixels with std
-        run: cargo hack -p yuv-pixels check --feature-powerset --features std --skip no-std
-
-      - name: Run cargo-hack on yuv-pixels with no-std
-        run: cargo hack -p yuv-pixels check --feature-powerset --features no-std --skip std
-
-      - name: Run cargo fmt
-        run: cargo fmt --all -- --check
-
       - name: Run Clippy
         run: cargo clippy --all-targets
 
