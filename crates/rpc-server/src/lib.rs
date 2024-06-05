@@ -49,7 +49,7 @@ where
     // per request approximately gives the maximum JSON RPC request size.
     //
     // See `providelistyuvproofs`
-    let max_request_body_size = AVERAGE_TX_SIZE * max_items_per_request;
+    let max_request_body_size = 20_000_000;
 
     let server = Server::builder()
         .max_request_body_size(max_request_body_size as u32)
